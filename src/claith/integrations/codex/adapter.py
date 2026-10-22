@@ -1,20 +1,18 @@
 """Async adapter for the Codex SDK."""
 
 from dataclasses import dataclass
-from types import TracebackType
-from typing import Self, override
+from typing import override
 
 from openai_codex import (
     AsyncChatgptLoginHandle,
     AsyncCodex,
-    AsyncThread,
     CodexConfig,
     Sandbox,
 )
 from openai_codex.types import CancelLoginAccountStatus
 
 from claith.agents import (
-    AgentRuntime,
+    AgentAdapter,
     AgentSession,
     LoginFlow,
     LoginResult,
@@ -30,7 +28,7 @@ _SANDBOX_BY_ACCESS = {
 
 
 @dataclass(slots=True)
-class _CodexLoginFlow:
+class _CodexLoginFlow(LoginFlow):
     handle: AsyncChatgptLoginHandle
 
     @property
@@ -50,34 +48,15 @@ class _CodexLoginFlow:
         return result.status is CancelLoginAccountStatus.canceled
 
 
-@dataclass(slots=True)
-class _CodexSession:
-    thread: AsyncThread
-
-    @property
-    def id(self) -> str:
-        return self.thread.id
-
-
-class CodexAdapter(AgentRuntime):
+class CodexAdapter(AgentAdapter):
     """Own an async Codex client and expose Claith's required operations."""
 
     def __init__(self, config: CodexConfig | None = None) -> None:
         self._client = AsyncCodex(config=config)
 
     @override
-    async def __aenter__(self) -> Self:
+    async def start(self) -> None:
         await self._client.__aenter__()
-        return self
-
-    @override
-    async def __aexit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_value: BaseException | None,
-        traceback: TracebackType | None,
-    ) -> None:
-        await self._client.__aexit__(exc_type, exc_value, traceback)
 
     @override
     async def close(self) -> None:
@@ -99,4 +78,4 @@ class CodexAdapter(AgentRuntime):
             model=request.model,
             sandbox=_SANDBOX_BY_ACCESS[request.workspace_access],
         )
-        return _CodexSession(thread)
+        return AgentSession(id=thread.id)

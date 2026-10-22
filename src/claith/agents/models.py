@@ -29,3 +29,10 @@ class LoginResult:
 
     success: bool
     error: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class AgentSession:
+    """Provider-independent reference to an agent conversation."""
+
+    id: str

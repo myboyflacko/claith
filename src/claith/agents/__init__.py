@@ -1,9 +1,16 @@
 """Provider-independent agent runtime contracts."""
 
-from claith.agents.models import LoginResult, StartSessionRequest, WorkspaceAccess
-from claith.agents.runtime import AgentRuntime, AgentSession, LoginFlow
+from claith.agents.adapter import AgentAdapter, LoginFlow
+from claith.agents.models import (
+    AgentSession,
+    LoginResult,
+    StartSessionRequest,
+    WorkspaceAccess,
+)
+from claith.agents.runtime import AgentRuntime
 
 __all__ = [
+    "AgentAdapter",
     "AgentRuntime",
     "AgentSession",
     "LoginFlow",

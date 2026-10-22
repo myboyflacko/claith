@@ -1,55 +1,37 @@
-"""Interfaces implemented by agent runtime adapters."""
+"""Provider-independent agent runtime."""
 
-from abc import abstractmethod
 from types import TracebackType
-from typing import Protocol, Self, runtime_checkable
+from typing import Self
 
-from claith.agents.models import LoginResult, StartSessionRequest
-
-
-@runtime_checkable
-class LoginFlow(Protocol):
-    """An interactive provider login that can be completed or canceled."""
-
-    @property
-    def id(self) -> str: ...
-
-    @property
-    def url(self) -> str: ...
-
-    async def wait(self) -> LoginResult: ...
-
-    async def cancel(self) -> bool: ...
+from claith.agents.adapter import AgentAdapter, LoginFlow
+from claith.agents.models import AgentSession, StartSessionRequest
 
 
-@runtime_checkable
-class AgentSession(Protocol):
-    """A provider-independent handle to an agent conversation."""
+class AgentRuntime:
+    """Expose one agent SDK adapter through Claith's common interface."""
 
-    @property
-    def id(self) -> str: ...
+    def __init__(self, adapter: AgentAdapter) -> None:
+        if not isinstance(adapter, AgentAdapter):
+            raise TypeError("adapter must implement AgentAdapter")
+        self._adapter = adapter
 
+    async def __aenter__(self) -> Self:
+        await self._adapter.start()
+        return self
 
-@runtime_checkable
-class AgentRuntime(Protocol):
-    """Common interface implemented by every agent SDK adapter."""
-
-    @abstractmethod
-    async def __aenter__(self) -> Self: ...
-
-    @abstractmethod
     async def __aexit__(
         self,
         exc_type: type[BaseException] | None,
         exc_value: BaseException | None,
         traceback: TracebackType | None,
-    ) -> None: ...
+    ) -> None:
+        await self.close()
 
-    @abstractmethod
-    async def login(self) -> LoginFlow: ...
+    async def login(self) -> LoginFlow:
+        return await self._adapter.login()
 
-    @abstractmethod
-    async def start_session(self, request: StartSessionRequest) -> AgentSession: ...
+    async def start_session(self, request: StartSessionRequest) -> AgentSession:
+        return await self._adapter.start_session(request)
 
-    @abstractmethod
-    async def close(self) -> None: ...
+    async def close(self) -> None:
+        await self._adapter.close()
