@@ -6,6 +6,7 @@ from typing import override
 from openai_codex import (
     AsyncChatgptLoginHandle,
     AsyncCodex,
+    AsyncThread,
     CodexConfig,
     Sandbox,
 )
@@ -14,6 +15,8 @@ from openai_codex.types import CancelLoginAccountStatus
 from claith.agents import (
     AgentAdapter,
     AgentSession,
+    AgentTurnResult,
+    AgentTurnStatus,
     LoginFlow,
     LoginResult,
     StartSessionRequest,
@@ -53,6 +56,7 @@ class CodexAdapter(AgentAdapter):
 
     def __init__(self, config: CodexConfig | None = None) -> None:
         self._client = AsyncCodex(config=config)
+        self._threads: dict[str, AsyncThread] = {}
 
     @override
     async def start(self) -> None:
@@ -78,4 +82,21 @@ class CodexAdapter(AgentAdapter):
             model=request.model,
             sandbox=_SANDBOX_BY_ACCESS[request.workspace_access],
         )
+        self._threads[thread.id] = thread
         return AgentSession(id=thread.id)
+
+    @override
+    async def send_message(self, session: AgentSession, body: str) -> AgentTurnResult:
+        """Send a message to a Codex thread and collect its final response."""
+        thread = self._threads.get(session.id)
+        if thread is None:
+            thread = await self._client.thread_resume(session.id)
+            self._threads[session.id] = thread
+
+        result = await thread.run(body)
+        return AgentTurnResult(
+            id=result.id,
+            status=AgentTurnStatus(result.status.value),
+            body=result.final_response,
+            error=result.error.message if result.error else None,
+        )

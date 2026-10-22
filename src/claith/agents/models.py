@@ -13,6 +13,14 @@ class WorkspaceAccess(StrEnum):
     FULL_ACCESS = "full_access"
 
 
+class AgentTurnStatus(StrEnum):
+    """Provider-independent state of a completed agent turn."""
+
+    COMPLETED = "completed"
+    INTERRUPTED = "interrupted"
+    FAILED = "failed"
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class StartSessionRequest:
     """Configuration shared by all agent runtime sessions."""
@@ -36,3 +44,13 @@ class AgentSession:
     """Provider-independent reference to an agent conversation."""
 
     id: str
+
+
+@dataclass(frozen=True, slots=True)
+class AgentTurnResult:
+    """Provider-independent result of sending a message to an agent."""
+
+    id: str
+    status: AgentTurnStatus
+    body: str | None = None
+    error: str | None = None

@@ -4,7 +4,7 @@ from types import TracebackType
 from typing import Self
 
 from claith.agents.adapter import AgentAdapter, LoginFlow
-from claith.agents.models import AgentSession, StartSessionRequest
+from claith.agents.models import AgentSession, AgentTurnResult, StartSessionRequest
 
 
 class AgentRuntime:
@@ -32,6 +32,9 @@ class AgentRuntime:
 
     async def start_session(self, request: StartSessionRequest) -> AgentSession:
         return await self._adapter.start_session(request)
+
+    async def send_message(self, session: AgentSession, body: str) -> AgentTurnResult:
+        return await self._adapter.send_message(session, body)
 
     async def close(self) -> None:
         await self._adapter.close()

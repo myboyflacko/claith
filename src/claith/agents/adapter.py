@@ -2,7 +2,12 @@
 
 from abc import ABC, abstractmethod
 
-from claith.agents.models import AgentSession, LoginResult, StartSessionRequest
+from claith.agents.models import (
+    AgentSession,
+    AgentTurnResult,
+    LoginResult,
+    StartSessionRequest,
+)
 
 
 class LoginFlow(ABC):
@@ -34,6 +39,11 @@ class AgentAdapter(ABC):
 
     @abstractmethod
     async def start_session(self, request: StartSessionRequest) -> AgentSession: ...
+
+    @abstractmethod
+    async def send_message(
+        self, session: AgentSession, body: str
+    ) -> AgentTurnResult: ...
 
     @abstractmethod
     async def close(self) -> None: ...
