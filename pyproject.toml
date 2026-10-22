@@ -10,6 +10,8 @@ dependencies = [
 
 [project.scripts]
 claith = "claith:main"
+claith-login = "claith.application.login:main"
+claith-thread-start = "claith.application.start_thread:main"
 
 [build-system]
 requires = ["uv_build>=0.12.2,<0.13.0"]
