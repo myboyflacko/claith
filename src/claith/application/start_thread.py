@@ -46,9 +46,15 @@ def _write_json(output: ThreadOutput) -> None:
     sys.stdout.write("\n")
 
 
+def _read_body() -> str:
+    if sys.stdin.isatty():
+        return sys.stdin.readline()
+    return sys.stdin.read()
+
+
 def main() -> None:
     """Read a message from stdin and emit exactly one JSON response."""
-    body = sys.stdin.read()
+    body = _read_body()
     if not body.strip():
         _write_json(
             {
