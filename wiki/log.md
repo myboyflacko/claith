@@ -10,3 +10,9 @@
 - Added [[project_goal]] from the confirmed setup interview.
 
 Last changed by: Codex
+
+## [2026-10-22] create | repository structure
+
+- Added [[project_repository-structure]] with the responsibilities of the top-level source areas.
+
+Last changed by: Codex
