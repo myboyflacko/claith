@@ -11,9 +11,12 @@ from openai_codex import (
     Sandbox,
 )
 from openai_codex.types import CancelLoginAccountStatus
+from openai_codex.types import ReasoningEffort as CodexReasoningEffort
 
 from claith.agents import (
     AgentAdapter,
+    AgentProvider,
+    AgentRunRequest,
     AgentSession,
     AgentTurnResult,
     AgentTurnStatus,
@@ -58,6 +61,11 @@ class CodexAdapter(AgentAdapter):
         self._client = AsyncCodex(config=config)
         self._threads: dict[str, AsyncThread] = {}
 
+    @property
+    @override
+    def provider(self) -> AgentProvider:
+        return AgentProvider.CODEX
+
     @override
     async def start(self) -> None:
         await self._client.__aenter__()
@@ -83,17 +91,23 @@ class CodexAdapter(AgentAdapter):
             sandbox=_SANDBOX_BY_ACCESS[request.workspace_access],
         )
         self._threads[thread.id] = thread
-        return AgentSession(id=thread.id)
+        return AgentSession(provider=self.provider, thread_id=thread.id)
 
     @override
-    async def send_message(self, session: AgentSession, body: str) -> AgentTurnResult:
+    async def send(self, thread_id: str, request: AgentRunRequest) -> AgentTurnResult:
         """Send a message to a Codex thread and collect its final response."""
-        thread = self._threads.get(session.id)
+        thread = self._threads.get(thread_id)
         if thread is None:
-            thread = await self._client.thread_resume(session.id)
-            self._threads[session.id] = thread
+            thread = await self._client.thread_resume(thread_id)
+            self._threads[thread_id] = thread
 
-        result = await thread.run(body)
+        effort = CodexReasoningEffort(request.effort.value) if request.effort else None
+        result = await thread.run(
+            request.body,
+            effort=effort,
+            model=request.model,
+            output_schema=request.output_schema,
+        )
         return AgentTurnResult(
             id=result.id,
             status=AgentTurnStatus(result.status.value),

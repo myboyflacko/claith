@@ -5,7 +5,9 @@ description = "Turn human-approved plans into reliably completed software delive
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "langgraph>=1.0",
     "openai-codex>=0.163.0",
+    "pydantic>=2.12",
 ]
 
 [project.scripts]

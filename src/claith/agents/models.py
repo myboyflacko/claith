@@ -3,6 +3,26 @@
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
+from typing import Any
+
+
+class AgentProvider(StrEnum):
+    """Agent SDK providers supported by the runtime."""
+
+    CODEX = "codex"
+
+
+class AgentReasoningEffort(StrEnum):
+    """Provider-independent reasoning effort for an agent turn."""
+
+    NONE = "none"
+    MINIMAL = "minimal"
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    XHIGH = "xhigh"
+    MAX = "max"
+    ULTRA = "ultra"
 
 
 class WorkspaceAccess(StrEnum):
@@ -43,7 +63,18 @@ class LoginResult:
 class AgentSession:
     """Provider-independent reference to an agent conversation."""
 
-    id: str
+    provider: AgentProvider
+    thread_id: str
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class AgentRunRequest:
+    """Configuration for one provider-independent agent turn."""
+
+    body: str
+    model: str | None = None
+    effort: AgentReasoningEffort | None = None
+    output_schema: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)

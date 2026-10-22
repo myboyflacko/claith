@@ -3,6 +3,8 @@
 from abc import ABC, abstractmethod
 
 from claith.agents.models import (
+    AgentProvider,
+    AgentRunRequest,
     AgentSession,
     AgentTurnResult,
     LoginResult,
@@ -31,6 +33,10 @@ class LoginFlow(ABC):
 class AgentAdapter(ABC):
     """Provider SDK operations required by the agent runtime."""
 
+    @property
+    @abstractmethod
+    def provider(self) -> AgentProvider: ...
+
     @abstractmethod
     async def start(self) -> None: ...
 
@@ -41,8 +47,8 @@ class AgentAdapter(ABC):
     async def start_session(self, request: StartSessionRequest) -> AgentSession: ...
 
     @abstractmethod
-    async def send_message(
-        self, session: AgentSession, body: str
+    async def send(
+        self, thread_id: str, request: AgentRunRequest
     ) -> AgentTurnResult: ...
 
     @abstractmethod

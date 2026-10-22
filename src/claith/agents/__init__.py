@@ -2,6 +2,9 @@
 
 from claith.agents.adapter import AgentAdapter, LoginFlow
 from claith.agents.models import (
+    AgentProvider,
+    AgentReasoningEffort,
+    AgentRunRequest,
     AgentSession,
     AgentTurnResult,
     AgentTurnStatus,
@@ -13,6 +16,9 @@ from claith.agents.runtime import AgentRuntime
 
 __all__ = [
     "AgentAdapter",
+    "AgentProvider",
+    "AgentReasoningEffort",
+    "AgentRunRequest",
     "AgentRuntime",
     "AgentSession",
     "AgentTurnResult",

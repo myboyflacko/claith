@@ -6,7 +6,13 @@ import sys
 from pathlib import Path
 from typing import TypedDict
 
-from claith.agents import AgentRuntime, AgentTurnResult, StartSessionRequest
+from claith.agents import (
+    AgentProvider,
+    AgentRunRequest,
+    AgentRuntime,
+    AgentTurnResult,
+    StartSessionRequest,
+)
 from claith.integrations.codex import CodexAdapter
 
 
@@ -34,11 +40,11 @@ async def start_thread(body: str) -> ThreadOutput:
     """Send a message in a new thread and return its collected response."""
     async with AgentRuntime(CodexAdapter()) as runtime:
         session = await runtime.start_session(
-            StartSessionRequest(working_directory=Path.cwd())
+            AgentProvider.CODEX, StartSessionRequest(working_directory=Path.cwd())
         )
-        result = await runtime.send_message(session, body)
+        result = await runtime.send(session, AgentRunRequest(body=body))
 
-    return _output(session.id, result)
+    return _output(session.thread_id, result)
 
 
 def _write_json(output: ThreadOutput) -> None:
