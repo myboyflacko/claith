@@ -31,7 +31,9 @@ def test_mismatched_workflow_result_cannot_advance_state() -> None:
             causation_id=request.event_id,
             event=ImplementationCompleted(
                 round=1,
-                output=ImplementationOutput(summary="done"),
+                output=ImplementationOutput(
+                    summary="done", changed_files=[], verification=[]
+                ),
                 session_thread_id="implementer-1",
             ),
         )

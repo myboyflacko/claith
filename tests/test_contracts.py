@@ -45,3 +45,15 @@ def test_output_contracts_forbid_unexpected_fields() -> None:
         ImplementationOutput.model_validate(
             {"summary": "Done", "changed_files": [], "verification": [], "extra": True}
         )
+
+
+def test_agent_output_schemas_require_every_property() -> None:
+    implementation_schema = ImplementationOutput.model_json_schema()
+    review_schema = ReviewOutput.model_json_schema()
+    finding_schema = review_schema["$defs"]["ReviewFinding"]
+
+    assert set(implementation_schema["required"]) == set(
+        implementation_schema["properties"]
+    )
+    assert set(review_schema["required"]) == set(review_schema["properties"])
+    assert set(finding_schema["required"]) == set(finding_schema["properties"])

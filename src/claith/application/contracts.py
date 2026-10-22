@@ -48,8 +48,8 @@ class ReviewFinding(BaseModel):
 
     severity: FindingSeverity
     message: str = Field(min_length=1)
-    file: str | None = None
-    line: int | None = Field(default=None, ge=1)
+    file: str | None
+    line: int | None = Field(ge=1)
 
 
 class ImplementationOutput(BaseModel):
@@ -58,8 +58,8 @@ class ImplementationOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     summary: str = Field(min_length=1)
-    changed_files: list[str] = Field(default_factory=list)
-    verification: list[str] = Field(default_factory=list)
+    changed_files: list[str]
+    verification: list[str]
 
 
 class ReviewOutput(BaseModel):
@@ -69,7 +69,7 @@ class ReviewOutput(BaseModel):
 
     verdict: ReviewVerdict
     summary: str = Field(min_length=1)
-    findings: list[ReviewFinding] = Field(default_factory=list)
+    findings: list[ReviewFinding]
 
 
 class DeliveryRequest(BaseModel):
