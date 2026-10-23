@@ -1,0 +1,16 @@
+[agents.implementer]
+provider = "codex"
+model = "replace-with-an-available-model"
+reasoning_effort = "high"
+instructions_file = "prompts/implementer.md"
+workspace_access = "workspace_write"
+
+[agents.reviewer]
+provider = "codex"
+model = "replace-with-an-available-model"
+reasoning_effort = "high"
+instructions_file = "prompts/reviewer.md"
+workspace_access = "read_only"
+
+[workflow]
+max_review_rounds = 3
