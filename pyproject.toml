@@ -1,7 +1,7 @@
 [project]
 name = "claith"
 version = "0.1.0"
-description = "Turn human-approved plans into reliably completed software deliveries with minimal intervention"
+description = "Self-hosted agentic development environment that turns approved Delivery Contracts into evidence-backed software outcomes with minimal developer attention"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

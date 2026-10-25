@@ -2,7 +2,7 @@
 
 **Name:** claith
 
-**Purpose:** Turn human-approved plans into reliably completed software deliveries with minimal intervention
+**Purpose:** Self-hosted agentic development environment that turns approved Delivery Contracts into evidence-backed software outcomes with minimal developer attention
 
 ## Project Index
 

@@ -1,6 +1,6 @@
 # claith
 
-Turn human-approved plans into reliably completed software deliveries with minimal intervention
+Self-hosted agentic development environment that turns approved Delivery Contracts into evidence-backed software outcomes with minimal developer attention
 
 ## Development
 

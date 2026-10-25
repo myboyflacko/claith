@@ -16,3 +16,9 @@ Last changed by: Codex
 - Added [[project_repository-structure]] with the responsibilities of the top-level source areas.
 
 Last changed by: Codex
+
+## [2026-10-25] update | project goal
+
+- Reframed [[project_goal]] around approved Delivery Contracts, evidence-backed outcomes, self-hosted runtimes, and minimal developer attention.
+
+Last changed by: Codex
