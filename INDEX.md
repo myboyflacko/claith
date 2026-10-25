@@ -9,5 +9,6 @@
 | `claith.example.toml` | Example agent profiles and workflow configuration |
 | `prompts/` | Versioned role instructions referenced by agent profiles |
 | `notebooks/` | Interactive workflow visualization and exploration |
+| `docs/research/` | Source-backed analyses informing product and architecture decisions |
 | `tests/` | Pytest test suite |
 | `wiki/index.md` | Entry point for durable project knowledge |
