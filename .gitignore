@@ -1,8 +1,7 @@
-.venv/
-__pycache__/
-*.py[cod]
-.pytest_cache/
-.ruff_cache/
+node_modules/
 dist/
-build/
-claith.toml
+coverage/
+.vitest/
+*.tsbuildinfo
+*.tgz
+npm-debug.log*

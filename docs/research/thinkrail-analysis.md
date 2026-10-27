@@ -4,6 +4,8 @@ Research date: 2026-10-25. ThinkRail snapshot: `d299f20d2ba014f382ddbcc9b49f2aa6
 
 This note distinguishes implementation observations, declared product intent, and recommendations. It is research, not an approved change to Claith's project goal. ThinkRail's source was inspected without installing dependencies or executing its application. Sources below are pinned to the inspected commit where possible.
 
+Claith status: this is a historical research note. The accepted direction now uses TypeScript, Temporal, and Pi; see the [delivery runtime design](../../wiki/architecture/architecture_delivery-runtime.md) and [current tooling status](../../wiki/architecture/architecture_tooling.md). Python/LangGraph integration options below reflect the research date.
+
 ## What ThinkRail is
 
 ThinkRail is an agentic IDE built around the `pi` coding-agent harness. Its product specification explicitly selects pi as its only engine and excludes a second host-owned model/tool loop. The product owns projects, isolated workspaces, the editor, terminals, review interfaces, and the connection to its clients. Pi owns model selection, prompts, skills and extensions, compaction, usage, and native session state. ThinkRail influences the agent through pi's extension and resource interfaces. Calling ThinkRail an IDE embedding and extending a harness is more precise than calling it a new independent harness. [Product goal][goal] [Architecture][architecture]
@@ -36,15 +38,15 @@ The important distinction is between durable intent and temporary execution. Dur
 
 Seven dedicated tools make the documents usable by an agent:
 
-| Tool | Responsibility |
-| --- | --- |
-| `spec_grep` | Find relevant content with metadata filters. |
-| `spec_get` | Resolve metadata, links, and the file path; ordinary read tools fetch prose. |
-| `spec_graph` | Return a bounded neighborhood rather than the complete repository graph. |
-| `spec_create` | Create a document with structured metadata. |
-| `spec_update` | Change frontmatter while preserving the prose. |
-| `spec_delete` | Remove a spec. |
-| `spec_validate` | Detect dangling links, duplicate IDs, and parent cycles. |
+| Tool            | Responsibility                                                               |
+| --------------- | ---------------------------------------------------------------------------- |
+| `spec_grep`     | Find relevant content with metadata filters.                                 |
+| `spec_get`      | Resolve metadata, links, and the file path; ordinary read tools fetch prose. |
+| `spec_graph`    | Return a bounded neighborhood rather than the complete repository graph.     |
+| `spec_create`   | Create a document with structured metadata.                                  |
+| `spec_update`   | Change frontmatter while preserving the prose.                               |
+| `spec_delete`   | Remove a spec.                                                               |
+| `spec_validate` | Detect dangling links, duplicate IDs, and parent cycles.                     |
 
 The filesystem remains authoritative. A derived read index rescans names and reuses parses for files whose modification time and size have not changed. The UI and agent tools share the same pi-free graph implementation. A small `before_agent_start` extension makes lookup conditional on whether a documented decision or contract governs the work. This is practical progressive disclosure, not loading every specification into every model call. [Spec module][spec-module] [Extension rule][spec-extension] [Validator][spec-validator]
 

@@ -1,7 +1,7 @@
 ---
 title: Project Goal
 created: 2026-10-22
-updated: 2026-10-25
+updated: 2026-10-27
 tags: [project]
 sources: []
 ---
@@ -28,3 +28,7 @@ Each runtime operates independently, durably, and recoverably across multiple pr
 - A general-purpose loop builder or marketplace is not part of the current product core.
 - Product roadmap and prioritization remain human responsibilities.
 - Active Delivery Contracts change only through explicit human approval.
+
+## Architecture and First Delivery Slice
+
+The accepted runtime direction is recorded in [[architecture_delivery-runtime]], with selected tools and current implementation status in [[architecture_tooling]]. The first delivery slice and its acceptance evidence are defined in [[project_phase-one]]. These pages distinguish the intended delivery runtime from the current TypeScript scaffold and local development service.

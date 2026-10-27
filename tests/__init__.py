@@ -1,1 +1,0 @@
-"""Claith test package."""
