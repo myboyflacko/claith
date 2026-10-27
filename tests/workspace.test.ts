@@ -12,6 +12,7 @@ import type {
 import {
   assertRevision,
   git,
+  runSetup,
   workspaceActivities,
 } from "../src/workspace/git.js";
 import { withOwnership } from "../src/workspace/ownership.js";
@@ -150,6 +151,59 @@ describe("isolated workspace and evidence", () => {
     await expect(
       assertRevision(attempt.workspace, result.revision),
     ).rejects.toThrow("differs");
+  });
+
+  it("invalidates evidence when a check changes and restores a tracked source file", async () => {
+    input.contract.checks[0]!.command =
+      "printf temporary > source.txt; git restore source.txt";
+    const { activities, attempt, result } = await candidate();
+    const checks = await activities.check({ ...attempt, candidate: result });
+    await assertRevision(attempt.workspace, result.revision);
+    expect(checks[0]?.unchanged).toBe(false);
+  });
+
+  it("refuses ownership while an orphan subprocess group can still write", async () => {
+    const { attempt } = await candidate();
+    const controller = new AbortController();
+    const output = join(attempt.workspace.artifactDir, "orphan.log");
+    const running = runCommand("sleep 30", {
+      cwd: attempt.workspace.path,
+      output,
+      timeoutMs: 60_000,
+      signal: controller.signal,
+    });
+    try {
+      for (
+        let i = 0;
+        i < 100 && !(await readJson(output + ".process.json"));
+        i++
+      )
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      await expect(
+        withOwnership(attempt.workspace.artifactDir, async () => {}),
+      ).rejects.toThrow("still has a live writer");
+    } finally {
+      controller.abort();
+      await running;
+    }
+    await expect(
+      withOwnership(attempt.workspace.artifactDir, async () => "safe"),
+    ).resolves.toBe("safe");
+  });
+
+  it("does not repeat a setup operation whose outcome is uncertain", async () => {
+    input.contract.setup = [
+      { id: "install", command: "touch unexpected-effect" },
+    ];
+    const { attempt } = await candidate();
+    await writeJson(
+      join(attempt.workspace.artifactDir, "setup-0-install.started.json"),
+      { command: input.contract.setup[0] },
+    );
+    await expect(runSetup(attempt)).rejects.toThrow("uncertain outcome");
+    await expect(
+      readFile(join(attempt.workspace.path, "unexpected-effect")),
+    ).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("rejects cached checks against another revision and rejects an overlapping writer", async () => {
