@@ -95,7 +95,7 @@ for workspace ownership and subprocess reconciliation.
 ## Verification
 
 ```bash
-npm test -- tests/configuration.test.ts tests/chat.test.ts tests/pi.test.ts
+npm test -- tests/configuration.test.ts tests/chat.test.ts tests/cli-process.test.ts tests/pi.test.ts
 npm test -- tests/workspace.test.ts tests/workflows.test.ts
 CLAITH_RECOVERY_TESTS=1 npm test -- tests/recovery.test.ts
 npm run typecheck
