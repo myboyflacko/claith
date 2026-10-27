@@ -1,10 +1,43 @@
+---
+title: ThinkRail - Architecture and Lessons for Claith
+created: 2026-10-25
+updated: 2026-10-27
+tags: [research, architecture]
+sources:
+  - "[[architecture_delivery-runtime]]"
+  - "[[architecture_tooling]]"
+  - "https://pi.dev/"
+  - "https://pi.dev/docs/latest/models-configuration"
+  - "https://pi.dev/docs/latest/custom-provider"
+  - "https://pi.dev/docs/latest/rpc"
+  - "https://github.com/JetBrains/thinkrail/blob/d299f20d2ba014f382ddbcc9b49f2aa63fada132/goal-and-requirements.md"
+  - "https://github.com/JetBrains/thinkrail/blob/d299f20d2ba014f382ddbcc9b49f2aa63fada132/architecture.md"
+  - "https://github.com/JetBrains/thinkrail/blob/d299f20d2ba014f382ddbcc9b49f2aa63fada132/package.json"
+  - "https://github.com/JetBrains/thinkrail/blob/d299f20d2ba014f382ddbcc9b49f2aa63fada132/packages/server/src/agent/agentSessionManager.ts"
+  - "https://github.com/JetBrains/thinkrail/blob/d299f20d2ba014f382ddbcc9b49f2aa63fada132/packages/server/src/agent/extensions.ts"
+  - "https://github.com/JetBrains/thinkrail/blob/d299f20d2ba014f382ddbcc9b49f2aa63fada132/packages/spec-graph/SPEC.md"
+  - "https://github.com/JetBrains/thinkrail/blob/d299f20d2ba014f382ddbcc9b49f2aa63fada132/packages/spec-graph/skills/spec-graph/SKILL.md"
+  - "https://github.com/JetBrains/thinkrail/blob/d299f20d2ba014f382ddbcc9b49f2aa63fada132/packages/spec-graph/core/parse.ts"
+  - "https://github.com/JetBrains/thinkrail/blob/d299f20d2ba014f382ddbcc9b49f2aa63fada132/packages/spec-graph/index.ts"
+  - "https://github.com/JetBrains/thinkrail/blob/d299f20d2ba014f382ddbcc9b49f2aa63fada132/packages/spec-graph/core/validate.ts"
+  - "https://github.com/JetBrains/thinkrail/blob/d299f20d2ba014f382ddbcc9b49f2aa63fada132/packages/pi-thinkrail-workflow/SPEC.md"
+  - "https://github.com/JetBrains/thinkrail/blob/d299f20d2ba014f382ddbcc9b49f2aa63fada132/packages/pi-thinkrail-workflow/skills/choosing-a-workflow/SKILL.md"
+  - "https://github.com/JetBrains/thinkrail/blob/d299f20d2ba014f382ddbcc9b49f2aa63fada132/packages/pi-todos/SPEC.md"
+  - "https://github.com/JetBrains/thinkrail/blob/d299f20d2ba014f382ddbcc9b49f2aa63fada132/packages/server/src/host/reviewerRole.ts"
+  - "https://github.com/JetBrains/thinkrail/blob/d299f20d2ba014f382ddbcc9b49f2aa63fada132/packages/server/src/agent/sessionRepair.ts"
+  - "https://github.com/JetBrains/thinkrail/blob/d299f20d2ba014f382ddbcc9b49f2aa63fada132/packages/pi-dag/SPEC.md"
+  - "https://github.com/JetBrains/thinkrail/blob/d299f20d2ba014f382ddbcc9b49f2aa63fada132/packages/pi-dag/runtime/service.ts"
+  - "https://github.com/JetBrains/thinkrail/blob/d299f20d2ba014f382ddbcc9b49f2aa63fada132/thinkrail-extensions/SPEC.md"
+  - "https://github.com/JetBrains/thinkrail/blob/d299f20d2ba014f382ddbcc9b49f2aa63fada132/pi-compatibility.md"
+---
+
 # ThinkRail: architecture and lessons for Claith
 
 Research date: 2026-10-25. ThinkRail snapshot: `d299f20d2ba014f382ddbcc9b49f2aa63fada132`.
 
 This note distinguishes implementation observations, declared product intent, and recommendations. It is research, not an approved change to Claith's project goal. ThinkRail's source was inspected without installing dependencies or executing its application. Sources below are pinned to the inspected commit where possible.
 
-Claith status: this is a historical research note. The accepted direction now uses TypeScript, Temporal, and Pi; see the [delivery runtime design](../../wiki/architecture/architecture_delivery-runtime.md) and [current tooling status](../../wiki/architecture/architecture_tooling.md). Python/LangGraph integration options below reflect the research date.
+Claith status: this is a historical research note. The accepted direction now uses TypeScript, Temporal, and Pi; see the [[architecture_delivery-runtime]] and [[architecture_tooling]]. Python/LangGraph integration options below reflect the research date.
 
 ## What ThinkRail is
 

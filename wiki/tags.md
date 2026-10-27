@@ -7,3 +7,4 @@ Reuse a suitable registered tag before adding another. Add tags only as part of 
 | project | Project direction, scope, and durable goals |
 | architecture | Runtime boundaries, execution semantics, and architectural decisions |
 | tooling | Selected tools, their responsibilities, and integration constraints |
+| research | Source-backed investigations and historical research snapshots |

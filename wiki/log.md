@@ -39,3 +39,10 @@ Last changed by: Codex
 - Recorded the requester-directed removal of the legacy runtime before its replacement and retained the remaining delivery-loop acceptance requirements.
 
 Last changed by: Codex
+
+## [2026-10-27] move | ThinkRail research into the project wiki
+
+- Moved the historical ThinkRail analysis from `docs/research/` to [[research_thinkrail-analysis]], preserving its content and external source references.
+- Added research metadata, tag registration, domain navigation, and internal wikilinks; removed the obsolete `docs/` entry from the repository index.
+
+Last changed by: Codex

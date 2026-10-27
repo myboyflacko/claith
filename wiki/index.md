@@ -6,6 +6,7 @@
 
 - [[PROJECT_INDEX]] — project direction, durable goal, and phase-one scope
 - [[ARCHITECTURE_INDEX]] — runtime design and selected tools
+- [[RESEARCH_INDEX]] — source-backed investigations and historical research
 
 ## Evidence
 
