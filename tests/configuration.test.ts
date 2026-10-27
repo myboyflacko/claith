@@ -36,8 +36,10 @@ describe("configuration directories", () => {
     const entries = await readdir(configDir, { withFileTypes: true });
     expect(entries.map((entry) => entry.name).sort()).toEqual([
       "agents",
+      "log",
       "sessions",
       "skills",
+      "worktrees",
     ]);
     for (const entry of entries) {
       expect(entry.isDirectory()).toBe(true);
@@ -64,7 +66,7 @@ describe("configuration directories", () => {
     expect(await readdir(join(configDir, "sessions"))).toEqual([]);
   });
 
-  it.each([".", "agents", "skills", "sessions"])(
+  it.each([".", "agents", "skills", "sessions", "worktrees", "log"])(
     "rejects when a file blocks the required directory %s",
     async (directory) => {
       const configDir = join(temporaryDirectory, ".claith");
@@ -94,8 +96,10 @@ describe("bootstrap", () => {
 
     expect((await readdir(configDir)).sort()).toEqual([
       "agents",
+      "log",
       "sessions",
       "skills",
+      "worktrees",
     ]);
   });
 
@@ -125,7 +129,7 @@ describe("application startup", () => {
     await startApplication();
 
     expect((await readdir(join(temporaryDirectory, ".claith"))).sort()).toEqual(
-      ["agents", "sessions", "skills"],
+      ["agents", "log", "sessions", "skills", "worktrees"],
     );
   });
 
@@ -135,6 +139,62 @@ describe("application startup", () => {
     await expect(startApplication()).rejects.toMatchObject({ code: 1 });
     expect(await readFile(join(temporaryDirectory, ".claith"), "utf8")).toBe(
       "preserve me",
+    );
+  });
+});
+
+describe("runtime configuration", () => {
+  it("creates templates without overwriting user files and requires explicit models", async () => {
+    const { initializeConfiguration, loadConfiguration } =
+      await import("../src/configuration.js");
+    await initializeConfiguration(temporaryDirectory);
+    await expect(loadConfiguration(temporaryDirectory)).rejects.toThrow(
+      "Select a Pi provider",
+    );
+    const runtimeFile = join(temporaryDirectory, "claith.toml");
+    await writeFile(runtimeFile, "maxRepairs = 1\n");
+    for (const role of ["orchestrator", "implementer", "reviewer"]) {
+      await writeFile(
+        join(temporaryDirectory, "agents", `${role}.toml`),
+        'provider = "test"\nmodel = "model"\ninstructions = "Follow contract"\n',
+      );
+    }
+    await initializeConfiguration(temporaryDirectory);
+    expect(await readFile(runtimeFile, "utf8")).toBe("maxRepairs = 1\n");
+    expect((await loadConfiguration(temporaryDirectory)).runtime).toMatchObject(
+      {
+        maxRepairs: 1,
+        agentTimeoutSeconds: 1800,
+        checkTimeoutSeconds: 600,
+        heartbeatIntervalSeconds: 10,
+        heartbeatTimeoutSeconds: 30,
+        reminderSeconds: 3600,
+      },
+    );
+  });
+
+  it("identifies malformed TOML, missing profiles, and invalid settings", async () => {
+    const { initializeConfiguration, loadConfiguration } =
+      await import("../src/configuration.js");
+    await expect(loadConfiguration(temporaryDirectory)).rejects.toThrow(
+      "claith.toml",
+    );
+    await initializeConfiguration(temporaryDirectory);
+    await writeFile(join(temporaryDirectory, "claith.toml"), "broken = [");
+    await expect(loadConfiguration(temporaryDirectory)).rejects.toThrow(
+      "Cannot load",
+    );
+    await writeFile(
+      join(temporaryDirectory, "claith.toml"),
+      "heartbeatIntervalSeconds = 30",
+    );
+    await expect(loadConfiguration(temporaryDirectory)).rejects.toThrow(
+      "heartbeatIntervalSeconds",
+    );
+    await writeFile(join(temporaryDirectory, "claith.toml"), "");
+    await rm(join(temporaryDirectory, "agents", "orchestrator.toml"));
+    await expect(loadConfiguration(temporaryDirectory)).rejects.toThrow(
+      "orchestrator.toml",
     );
   });
 });
