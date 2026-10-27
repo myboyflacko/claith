@@ -46,6 +46,42 @@ Closing chat never cancels execution. A worker can be stopped and restarted with
 persistent reconciliation questions. Silence and reminder timers never approve work.
 Run the worker under your preferred process supervisor for unattended use.
 
+## Read-only session status JSON
+
+Query an existing session without opening chat or supplying `--project`:
+
+```bash
+npm run dev -- status --session <id> --json
+npm run build
+npm start -- status --session <id> --json
+# Equivalent compiled invocation, without npm's lifecycle output:
+node dist/main.js status --session <id> --json
+```
+
+Use the existing server configured by `address`, `namespace`, and `taskQueue` in
+`~/.claith/claith.toml`. The session must already exist and its workflow must be
+queryable by an existing worker. This command starts no server, worker, session,
+or model call, and does not approve or cancel work. Normal configuration loading
+still requires valid `~/.claith/agents/{orchestrator,implementer,reviewer}.toml`
+profiles; querying itself needs no model credentials or Pi login.
+
+Both `--session` and `--json` are required. Application stdout contains exactly
+one JSON document: the complete existing `SessionSnapshot`, not the chat display
+summary. All fields are retained, including `sessionId`, `state`, `currentTask`,
+and `pendingEscalation`; absent task/escalation values remain JSON `null` and
+populated values retain their nested contents. The connected client is closed
+after querying. Missing arguments, unknown sessions, configuration errors, and
+connection/query failures produce diagnostics on stderr and a nonzero exit,
+without a status document on stdout.
+
+When capturing JSON through npm, suppress npm's own lifecycle output (which is
+not application stdout) using `npm --silent run dev -- status --session <id> --json`
+or `npm --silent start -- status --session <id> --json`.
+
+Deterministic CLI tests cover development and compiled entrypoints using a
+process-local client double, without servers or model calls. They do not establish
+live-server or real-model acceptance.
+
 ## Configuration and evidence
 
 Ordinary startup creates five directories and no configuration files. `init` creates
@@ -94,14 +130,16 @@ for workspace ownership and subprocess reconciliation.
 
 ## Verification
 
+The CLI process tests require the compiled entrypoint, so build before running them.
+
 ```bash
+npm run build
 npm test -- tests/configuration.test.ts tests/chat.test.ts tests/cli-process.test.ts tests/pi.test.ts
 npm test -- tests/workspace.test.ts tests/workflows.test.ts
 CLAITH_RECOVERY_TESTS=1 npm test -- tests/recovery.test.ts
 npm run typecheck
 npm run lint:files -- src tests
 npm run format:check:files -- src tests README.md INDEX.md
-npm run build
 npm start -- init
 npm start -- runtime
 ```
