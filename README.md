@@ -13,17 +13,20 @@ npm ci
 npm run dev
 ```
 
-`src/main.ts` currently prints a scaffold readiness message. The delivery runtime
-and its integration with Temporal and Pi have not been implemented yet.
+`src/main.ts` initializes the central configuration directory through
+`src/bootstrap.ts`. The default path is `~/.claith`, defined in `src/settings.ts`.
+Startup creates the `agents/`, `skills/`, and `sessions/` subdirectories, preserving
+existing contents. It does not create files or a `databases/` directory. Startup
+fails if a required directory cannot be created.
+
+The delivery runtime and its integration with Temporal and Pi have not been
+implemented yet.
 
 - `npm run typecheck` checks source, tests, and the Vitest configuration.
 - `npm run lint` checks code; `npm run format` formats files.
 - `npm run format:check` checks formatting without changing files.
-- `npm test -- tests/example.test.ts` runs a specific test file once it exists.
+- `npm test -- tests/configuration.test.ts` checks directory creation and startup.
 - `npm run build` compiles source into `dist/`; `npm start` runs the compiled app.
-
-`tests/` starts empty. `npm test` fails when no tests exist; use
-`npm test -- --passWithNoTests` only to verify the initial Vitest configuration.
 
 ### Temporal development server
 

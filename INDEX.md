@@ -11,8 +11,11 @@
 | `.prettierrc.json`                        | Prettier formatting configuration                              |
 | `.prettierignore`                         | Files excluded from automatic formatting                       |
 | `vitest.config.ts`                        | Vitest configuration                                           |
-| `src/main.ts`                             | Application entry point; currently a scaffold placeholder      |
-| `tests/`                                  | Vitest behavior tests; initially empty                         |
+| `src/main.ts`                             | Application entry point; awaits startup initialization         |
+| `src/bootstrap.ts`                        | Wires application settings to startup initialization           |
+| `src/settings.ts`                         | Application settings, including the central configuration path |
+| `src/infrastructure/directories.ts`       | Creates the central configuration directory and subdirectories |
+| `tests/`                                  | Vitest tests for configuration directories and startup         |
 | `docker-compose.yml`                      | Persistent local Temporal development server and Web UI        |
 | `wiki/index.md`                           | Entry point for durable project knowledge                      |
 | `wiki/architecture/ARCHITECTURE_INDEX.md` | Accepted delivery runtime design and selected tools            |

@@ -1,1 +1,3 @@
-console.log("Claith TypeScript scaffold is ready.");
+import { bootstrap } from "./bootstrap.js";
+
+await bootstrap();
