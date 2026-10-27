@@ -23,12 +23,11 @@ Use GitHub Issues through GitHub CLI (gh).
 
 ## Working Standards
 
-- Use Python 3.12 and manage the project and its dependencies with `uv`.
-- Run project tools through `uv run`.
-- Use `pytest`. Add relevant tests for behavior changes and bug fixes.
+- Use the tooling configured in the repository for the component being changed.
+- Add relevant tests for behavior changes and bug fixes.
 - Automatically run the smallest relevant tests. Run the complete test suite only when explicitly requested.
-- Use Ruff for linting and formatting. Lint and format changed Python files.
-- Run the smallest safe task-appropriate verification. Run `uv build` only when explicitly requested or when the task changes packaging behavior.
+- Lint and format changed files with the component's configured tools.
+- Run the smallest safe task-appropriate verification. Run builds only when explicitly requested or when the task changes packaging behavior.
 - Change only what directly belongs to the task; avoid incidental refactors and speculative features.
 - Keep output short and limited to relevant results.
 
