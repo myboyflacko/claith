@@ -4,7 +4,8 @@
 
 ## Knowledge Domains
 
-- [[PROJECT_INDEX]] — project direction and durable goal
+- [[PROJECT_INDEX]] — project direction, durable goal, and phase-one scope
+- [[ARCHITECTURE_INDEX]] — runtime design and selected tools
 
 ## Evidence
 

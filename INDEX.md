@@ -11,3 +11,5 @@
 | `notebooks/` | Interactive workflow visualization and exploration |
 | `tests/` | Pytest test suite |
 | `wiki/index.md` | Entry point for durable project knowledge |
+| `wiki/architecture/ARCHITECTURE_INDEX.md` | Accepted delivery runtime design and selected tools |
+| `wiki/project/project_phase-one.md` | First delivery slice, boundaries, and acceptance evidence |
