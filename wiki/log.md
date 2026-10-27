@@ -30,3 +30,12 @@ Last changed by: Codex
 - Linked the decisions from [[project_goal]], updated navigation and tag registration, and kept trading outside Claith's scope.
 
 Last changed by: Codex
+
+## [2026-10-27] update | runtime design and TypeScript scaffold alignment
+
+- Integrated the accepted runtime design and phase-one scope with the current TypeScript scaffold and persistent local Temporal development service.
+- Corrected implementation status in [[architecture_delivery-runtime]], [[architecture_tooling]], [[project_phase-one]], and the architecture links in [[project_goal]]; the product goal is unchanged.
+- Replaced the obsolete Python layout in [[project_repository-structure]] with the current repository and a clearly marked module proposal, and updated navigation.
+- Recorded the requester-directed removal of the legacy runtime before its replacement and retained the remaining delivery-loop acceptance requirements.
+
+Last changed by: Codex

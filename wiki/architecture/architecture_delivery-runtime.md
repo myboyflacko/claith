@@ -18,7 +18,7 @@ sources:
 
 ## Decision and implementation status
 
-Claith selects Temporal for durable workflow orchestration and the Pi SDK for agent execution. The target application runtime and workers use TypeScript on Node.js so they can embed Pi directly. This is the accepted direction; the repository currently implements a Python/LangGraph workflow with a Codex adapter and in-memory messaging and checkpointing. The migration and its practical validation belong to [[project_phase-one]].
+Claith selects Temporal for durable workflow orchestration and the Pi SDK for agent execution. The target application runtime and workers use TypeScript on Node.js so they can embed Pi directly. The repository currently provides a TypeScript scaffold and a persistent Temporal CLI development service. The legacy Python/LangGraph/Codex implementation has been removed; application workflows, workers, and Pi execution remain to be implemented and validated in [[project_phase-one]].
 
 This design serves [[project_goal]]: a self-hosted runtime turns an approved Delivery Contract into an evidence-backed outcome. Trading systems are a separate topic and are outside Claith's scope.
 

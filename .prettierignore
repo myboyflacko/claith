@@ -1,0 +1,12 @@
+node_modules/
+dist/
+coverage/
+.vitest/
+*.tgz
+package-lock.json
+wiki/
+.agents/
+.claude/
+.codex/
+# Preserve the existing infrastructure configuration.
+docker-compose.yml

@@ -31,4 +31,4 @@ Each runtime operates independently, durably, and recoverably across multiple pr
 
 ## Architecture and First Delivery Slice
 
-The accepted runtime direction is recorded in [[architecture_delivery-runtime]], with selected tools and current implementation boundaries in [[architecture_tooling]]. The first delivery slice and its acceptance evidence are defined in [[project_phase-one]]. These decisions implement this goal; they do not indicate that the current Python/LangGraph code has already migrated.
+The accepted runtime direction is recorded in [[architecture_delivery-runtime]], with selected tools and current implementation status in [[architecture_tooling]]. The first delivery slice and its acceptance evidence are defined in [[project_phase-one]]. These pages distinguish the intended delivery runtime from the current TypeScript scaffold and local development service.

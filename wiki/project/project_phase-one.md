@@ -15,7 +15,7 @@ sources:
 
 Deliver a small end-to-end slice of [[project_goal]]: the developer approves a bounded contract through an orchestrator entry point, Claith executes the required work in a repository, and the developer can inspect the result or answer a blocker. Temporal owns execution state and Pi runs the agents. Closing the control client or restarting a worker must not lose the run's recorded progress.
 
-This phase introduces and verifies the target runtime. It does not claim that the existing Python/LangGraph implementation has already migrated. Implement the slice before removing the old path. Framework suitability is checked through running workflows and recovery tests; it is not a throughput claim.
+This phase implements and verifies the target runtime from the current TypeScript scaffold and persistent local Temporal service. The former Python/LangGraph/Codex implementation has already been removed at the requester's direction, superseding the earlier sequence of keeping it until the replacement slice worked. Its removal does not establish migrated behavior or a completed delivery loop. Framework suitability is checked through running workflows and recovery tests; it is not a throughput claim.
 
 ## Scope
 
@@ -29,9 +29,9 @@ This phase introduces and verifies the target runtime. It does not claim that th
 
 ## Delivery sequence
 
-Start with the Temporal runner, persistent development service, stub activities, and a small control client. Verify plan selection, state inspection, repair limits, and human waiting without model cost. Then connect Pi role sessions and completion tools and run the same workflow with real repository work. Extend the orchestrator entry point to draft and submit the bounded contracts used by that slice.
+The TypeScript/npm toolchain and persistent development service are already configured. Next implement the Temporal runner, stub activities, and a small control client. Verify plan selection, state inspection, repair limits, and human waiting without model cost. Then connect Pi role sessions and completion tools and run the same workflow with real repository work. Extend the orchestrator entry point to draft and submit the bounded contracts used by that slice.
 
-Pin the chosen package versions and record setup, start, test, and recovery commands as part of implementation. Measure dispatch latency and idle resource use alongside representative runs. A production self-hosting configuration follows the deployment requirements; a local development server alone does not demonstrate production readiness.
+Keep the existing toolchain lockfile and pin Temporal SDK and Pi versions when those dependencies are introduced. Extend the current setup and start instructions with worker, test, and recovery commands as part of implementation. Measure dispatch latency and idle resource use alongside representative runs. A production self-hosting configuration follows the deployment requirements; a local development server alone does not demonstrate production readiness.
 
 ## Acceptance evidence
 

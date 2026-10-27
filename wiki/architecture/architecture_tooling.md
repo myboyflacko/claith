@@ -14,28 +14,29 @@ sources:
 
 # Runtime and Agent Tooling
 
-## Selected target stack
+## Selected stack and current availability
 
-These choices implement [[architecture_delivery-runtime]]. They describe the target, not dependencies already installed in this repository.
+These choices implement [[architecture_delivery-runtime]]. The repository contains the TypeScript development foundation and a local Temporal service; the delivery runtime is still a target. `package.json`, `package-lock.json`, and `docker-compose.yml` are authoritative for configured dependencies and versions.
 
 | Tool | Selected responsibility |
 | --- | --- |
-| TypeScript and Node.js | New application runtime and workers; embed Pi in process. |
-| Temporal Service | Durable execution history, task dispatch, timers, retries, and workflow recovery. Self-hosting is the deployment direction. |
-| Temporal TypeScript SDK | `@temporalio/workflow`, `@temporalio/worker`, and `@temporalio/client` for workflow code, activities, and control requests. |
-| Pi SDK | `@earendil-works/pi-coding-agent` for model access, sessions, coding tools, role instructions, and custom completion tools. |
-| PostgreSQL | Persistence backing for the sustained, self-hosted Temporal deployment. Claith accesses workflow state through Temporal rather than writing its internal tables. |
-| Temporal CLI and Web UI | Local development service and execution inspection. The development server requires explicit persistent storage for restart checks and is not the production deployment plan. |
-| Git and worktrees | Isolate run branches and working directories; identify the code revisions associated with reviews and evidence. |
+| TypeScript and Node.js | Node.js 24 and a strict ESM TypeScript scaffold are configured. Application workers and in-process Pi execution are not implemented yet. |
+| npm and development tools | npm with a lockfile, ESLint, Prettier, Vitest, and tsx are configured. The test directory starts empty. |
+| Temporal Service | Selected for durable execution history, task dispatch, timers, retries, and recovery. A local development service is configured; a production self-hosted deployment is not. |
+| Temporal TypeScript SDK | Planned dependencies: `@temporalio/workflow`, `@temporalio/worker`, and `@temporalio/client` for workflow code, activities, and control requests. Not yet installed. |
+| Pi SDK | Planned dependency: `@earendil-works/pi-coding-agent` for model access, sessions, coding tools, role instructions, and custom completion tools. Not yet installed. |
+| PostgreSQL | Selected persistence backing for the sustained, self-hosted Temporal deployment. Not part of the current Compose file. Claith will access workflow state through Temporal rather than writing its internal tables. |
+| Temporal CLI and Web UI | `docker-compose.yml` runs the CLI development server with local API/UI ports and SQLite storage in a named Docker volume. This supports local restart checks; it is not the production deployment plan. |
+| Git and worktrees | Selected for run isolation and code revision references. Automated workspace allocation and exclusion of concurrent writers remain to be implemented. |
 | GitHub CLI (`gh`) | Existing issue workflow for `myboyflacko/claith`; later delivery integration is governed by contract authority. |
 | Repository Markdown wiki | Curated project knowledge and accepted decisions. Agent context loads relevant pages rather than every project's entire wiki. |
-| Durable session and artifact storage | Pi transcripts, structured tool-call logs, diffs, test evidence, and result references. Local persistent storage is sufficient for the first single-host slice. |
+| Durable session and artifact storage | Planned storage for Pi transcripts, structured tool-call logs, diffs, test evidence, and result references. Local persistent storage is sufficient for the first single-host slice; the scaffold does not implement it. |
 
 Pi supplies provider integration; credentials and actual model availability remain provider-specific. Model IDs and reasoning settings are configuration, not fixed architecture choices. Each role can use an appropriate supported model without changing workflow routing.
 
-## Initial role profiles and tools
+## Planned role profiles and tools
 
-Profiles explicitly configure model, reasoning settings, instruction sources, working directory, and allowed tools. The application controls which extensions and MCP tools can load. Only registered, approved tools are available to a role.
+These profiles and Claith completion tools are planned, not supplied by the scaffold. Profiles explicitly configure model, reasoning settings, instruction sources, working directory, and allowed tools. The application controls which extensions and MCP tools can load. Only registered, approved tools are available to a role.
 
 | Role | Initial tool boundary |
 | --- | --- |
@@ -47,10 +48,12 @@ The `read_diff` and `submit_*` tools are Claith APIs to implement, not built-in 
 
 The host observes Pi tool and session events for logging. Shared provider-independent tool definitions belong in this integration, allowing the same role behavior across supported models. Native Pi session storage and Claith workflow history serve different purposes.
 
-## Migration and deferred selections
+## Implementation status and deferred selections
 
-The current executable baseline uses Python 3.12, `uv`, LangGraph, Pydantic, and the Codex adapter. Its tests use pytest and Ruff. Those remain authoritative for current code until a separate implementation change introduces the TypeScript runtime and its commands, dependencies, tests, and updated repository instructions.
+The executable baseline is now the TypeScript scaffold. `src/main.ts` prints a readiness message; it does not execute a Delivery Contract or connect to Temporal. npm scripts cover development, type checking, linting, formatting, Vitest, building, and compiled startup. The legacy Python/LangGraph/Codex implementation and its tooling were removed at the requester's direction. Removal and scaffolding do not demonstrate that its behavior has been migrated or that phase one is complete.
 
 Temporal replaces LangGraph as the selected outer delivery runtime. Pi replaces the Codex-only agent execution path in the target. Phase one does not require LangChain, a separate BullMQ/Redis/Kafka broker, a general event inbox, or additional Codex/Claude/OpenCode harness adapters.
 
-Package versions, TypeScript package manager and test runner, profile configuration format, and the production deployment recipe are settled and recorded during phase-one implementation. The custom UI framework remains open; a full UI is not required to validate the runtime.
+The package manager and test runner are settled as npm and Vitest, with development dependency versions pinned in `package.json` and `package-lock.json`. Temporal SDK and Pi versions, profile configuration format, and the production deployment recipe remain to be settled during phase-one implementation. The custom UI framework remains open; a full UI is not required to validate the runtime.
+
+The current Compose file packages only the local Temporal development service. It does not require the Claith application runtime or its UI to be deployed as containers. Native background service packaging and application container packaging remain deployment choices.
