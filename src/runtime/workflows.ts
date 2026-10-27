@@ -66,6 +66,7 @@ export async function coordinator(
   };
   const receipts = new Map<string, { fingerprint: string; value: string }>();
   const approvals = new Map<string, string>();
+  const repairBudgets = new Map<string, number>();
   const versions = new Map<string, number>();
   const resolvedQuestions = new Set<string>();
   const queue: string[] = [];
@@ -126,6 +127,7 @@ export async function coordinator(
       );
       approval = request;
       approvals.set(approvedKey, executionId);
+      repairBudgets.set(executionId, request.configuration.runtime.maxRepairs);
       snapshot.state = "running";
       snapshot.currentTask = {
         executionId,
@@ -172,10 +174,21 @@ export async function coordinator(
           q.criteria.some((id) => !decision.confirmCriteria.includes(id)))
       )
         reject("Confirm all pending criteria explicitly");
-      if (q.kind !== "acceptance" && decision.additionalRepairs < 1)
+      const available =
+        (repairBudgets.get(q.executionId) ?? 0) -
+        (snapshot.currentTask?.repairsUsed ?? 0);
+      if (
+        q.kind !== "acceptance" &&
+        decision.additionalRepairs < 1 &&
+        (q.kind === "repair" || available <= 0)
+      )
         reject("Grant an explicit bounded continuation");
       if (!decision.answer.trim()) reject("An answer is required");
       resolvedQuestions.add(q.id);
+      repairBudgets.set(
+        q.executionId,
+        (repairBudgets.get(q.executionId) ?? 0) + decision.additionalRepairs,
+      );
       snapshot.pendingEscalation = null;
       dispatch = true;
       return decision.escalationId;

@@ -26,6 +26,10 @@ export function displaySnapshot(s: SessionSnapshot): string {
         ? `/answer ${q.id} confirm ${q.criteria.join(",")} <reason>`
         : `/continue ${q.id} <additional rounds 1..20> <answer>`,
     );
+    if (q.kind === "blocker" || q.kind === "recovery")
+      lines.push(
+        `/answer ${q.id} <answer> uses the remaining approved repair budget`,
+      );
   }
   for (const result of s.acceptedResults) {
     lines.push(

@@ -63,6 +63,7 @@ describe("durable delivery workflows", () => {
       human?: boolean;
       changesRequested?: boolean;
       mixedFailures?: boolean;
+      blockedFirst?: boolean;
     } = {},
   ) {
     const id = randomUUID();
@@ -93,10 +94,11 @@ describe("durable delivery workflows", () => {
         calls.push("prepare");
         return workspace;
       },
-      implement: async () => {
+      implement: async ({ attempt }) => {
         calls.push("implement");
         return {
-          status: "submitted",
+          status:
+            options.blockedFirst && attempt === 0 ? "blocked" : "submitted",
           summary: "Done",
           evidence: [{ criterionId: "works", references: ["test"] }],
         };
@@ -358,6 +360,43 @@ describe("durable delivery workflows", () => {
       expect(s.calls.filter((c) => c === "implement")).toHaveLength(4);
       await s.handle.executeUpdate("cancel", { args: ["cancel"] });
       await s.handle.result();
+    });
+  }, 60_000);
+
+  it("answers a resolved blocker using the remaining approved budget without granting extra rounds", async () => {
+    const s = await scenario({ blockedFirst: true });
+    await s.worker.runUntil(async () => {
+      await s.handle.executeUpdate("conversation", {
+        args: [{ id: "goal", text: "Do task" }],
+      });
+      await s.waitState("awaiting_approval");
+      await s.handle.executeUpdate("approve", {
+        args: [
+          {
+            commandId: "approve",
+            taskId: s.c.taskId,
+            version: 1,
+            configuration,
+          },
+        ],
+      });
+      const q = (await s.waitState("waiting")).pendingEscalation!;
+      await s.handle.executeUpdate("decision", {
+        args: [
+          {
+            commandId: "answer",
+            executionId: q.executionId,
+            escalationId: q.id,
+            answer: "Input is now available",
+            additionalRepairs: 0,
+            confirmCriteria: [],
+          },
+        ],
+      });
+      expect(((await s.handle.result()) as SessionSnapshot).state).toBe(
+        "completed",
+      );
+      expect(s.calls.filter((c) => c === "implement")).toHaveLength(2);
     });
   }, 60_000);
 });

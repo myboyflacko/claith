@@ -44,6 +44,9 @@ export async function runCommand(
         ],
         {
           cwd: options.cwd,
+          // npm run exports this one-off flag, which nested project installs reject.
+          // Let npm read the target project's normal configuration and script policy.
+          env: commandEnvironment(),
           detached: true,
           stdio: ["pipe", output.fd, output.fd],
         },
@@ -110,4 +113,13 @@ export async function runCommand(
   } finally {
     await output.close();
   }
+}
+
+function commandEnvironment(): NodeJS.ProcessEnv {
+  const environment = { ...process.env };
+  if (environment.npm_lifecycle_event) {
+    delete environment.npm_config_allow_scripts;
+    delete environment.NPM_CONFIG_ALLOW_SCRIPTS;
+  }
+  return environment;
 }

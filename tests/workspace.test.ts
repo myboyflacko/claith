@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { profileSchema, runtimeSchema } from "../src/configuration.js";
 import type {
   AttemptInput,
@@ -70,6 +70,7 @@ beforeEach(async () => {
   };
 });
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await rm(temp, { recursive: true, force: true });
 });
 async function candidate() {
@@ -190,6 +191,32 @@ describe("isolated workspace and evidence", () => {
     });
     setTimeout(() => controller.abort(), 50);
     expect(await running).toBeNull();
+  });
+
+  it("runs approved locked installs from an npm-started worker without inheriting one-off script flags", async () => {
+    vi.stubEnv("npm_lifecycle_event", "start");
+    vi.stubEnv("npm_config_allow_scripts", "one-off-package");
+    await writeFile(
+      join(project, "package.json"),
+      JSON.stringify({ name: "fixture", version: "1.0.0" }),
+    );
+    await writeFile(
+      join(project, "package-lock.json"),
+      JSON.stringify({
+        name: "fixture",
+        version: "1.0.0",
+        lockfileVersion: 3,
+        packages: { "": { name: "fixture", version: "1.0.0" } },
+      }),
+    );
+    const output = join(temp, "install.log");
+    const exitCode = await runCommand("npm ci --no-audit --no-fund", {
+      cwd: project,
+      output,
+      timeoutMs: 10_000,
+    });
+    expect(await readFile(output, "utf8")).not.toContain("EALLOWSCRIPTS");
+    expect(exitCode).toBe(0);
   });
 
   it("refuses an approval identity reused with different contents", async () => {

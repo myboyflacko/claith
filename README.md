@@ -37,6 +37,7 @@ Task branches are preserved; merging and publishing are manual, outside phase on
 | `/approve`                                               | Approve the displayed contract and snapshot current configuration       |
 | `/status`                                                | Show current progress, question, and accepted evidence                  |
 | `/continue <question-id> <rounds> <answer>`              | Answer a blocker/recovery question and grant 1–20 extra repairs         |
+| `/answer <question-id> <answer>`                         | Resolve a blocker using remaining approved repairs                      |
 | `/answer <question-id> confirm <criterion-ids> <reason>` | Explicitly confirm all pending human criteria (IDs separated by commas) |
 | `/cancel`                                                | Cancel this goal and active work, retaining artifacts                   |
 | `/quit`                                                  | Disconnect chat; runtime execution and pending questions continue       |
