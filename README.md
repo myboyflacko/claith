@@ -4,9 +4,26 @@ Self-hosted agentic development environment that turns approved Delivery Contrac
 
 ## Development
 
-The repository currently contains project documentation and a local Temporal
-development service. The replacement application runtime has not been implemented
-yet.
+This project uses TypeScript, Node.js 24, npm, ESLint, Prettier, and Vitest.
+Activate the Node.js version in `.nvmrc`, then install dependencies and run the
+application entry point:
+
+```bash
+npm ci
+npm run dev
+```
+
+`src/main.ts` currently prints a scaffold readiness message. The delivery runtime
+and its integration with Temporal and Pi have not been implemented yet.
+
+- `npm run typecheck` checks source, tests, and the Vitest configuration.
+- `npm run lint` checks code; `npm run format` formats files.
+- `npm run format:check` checks formatting without changing files.
+- `npm test -- tests/example.test.ts` runs a specific test file once it exists.
+- `npm run build` compiles source into `dist/`; `npm start` runs the compiled app.
+
+`tests/` starts empty. `npm test` fails when no tests exist; use
+`npm test -- --passWithNoTests` only to verify the initial Vitest configuration.
 
 ### Temporal development server
 

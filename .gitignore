@@ -1,0 +1,7 @@
+node_modules/
+dist/
+coverage/
+.vitest/
+*.tsbuildinfo
+*.tgz
+npm-debug.log*
