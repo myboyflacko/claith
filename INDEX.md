@@ -1,6 +1,7 @@
 | path | description |
 | ---- | ----------- |
 | `pyproject.toml` | Project metadata, dependencies, and tool configuration |
+| `docker-compose.yml` | Persistent local Temporal development server and Web UI |
 | `src/claith/` | Python source package |
 | `src/claith/agents/` | Provider-independent agent runtime interfaces and values |
 | `src/claith/application/` | Executable application workflows built on the agent runtime |

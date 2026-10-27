@@ -6,6 +6,24 @@ Self-hosted agentic development environment that turns approved Delivery Contrac
 
 This project uses Python 3.12, `uv`, Ruff, and pytest.
 
+### Temporal development server
+
+With Docker and Docker Compose installed, start the
+[Temporal CLI development server](https://docs.temporal.io/cli/setup-cli):
+
+```bash
+docker compose up -d --wait
+```
+
+The Temporal API is available at `127.0.0.1:7233` and the Web UI at
+<http://127.0.0.1:8233>. Both ports are bound to the local host only.
+SQLite state is stored in the `temporal-data` Docker volume and survives
+container recreation. Stop the service with `docker compose down`; add
+`--volumes` only to intentionally delete the stored state.
+
+This service is for local development. The existing Python workflow below does
+not yet connect to Temporal.
+
 ## Implementation-review workflow
 
 Copy `claith.example.toml` to `claith.toml`, select an available model for both
