@@ -48,6 +48,46 @@ async function submit(tool: ToolDefinition, result: unknown) {
   );
 }
 describe("Pi role protocol without paid calls", () => {
+  it("resumes the implementer transcript for repairs and opens distinct reviewer sessions", async () => {
+    const ids: string[] = [];
+    const factory: SessionFactory = async (options) => {
+      const manager = options.sessionManager!;
+      ids.push(manager.getSessionId());
+      return {
+        session: {
+          subscribe: () => () => {},
+          abort: async () => {},
+          dispose: () => {},
+          prompt: async (text) => {
+            manager.appendMessage({
+              role: "user",
+              content: text,
+              timestamp: Date.now(),
+            });
+            await submit(options.customTools!.at(-1)!, { task: "current" });
+          },
+        },
+      };
+    };
+    await runRole(request(), factory);
+    await runRole({ ...request(), prompt: "Repair the same task" }, factory);
+    await runRole(
+      { ...request("reviewer"), directory: join(temp, "candidate-one") },
+      factory,
+    );
+    await runRole(
+      { ...request("reviewer"), directory: join(temp, "candidate-two") },
+      factory,
+    );
+    expect(ids[0]).toBe(ids[1]);
+    expect(new Set(ids).size).toBe(3);
+    const manifest = JSON.parse(
+      await readFile(join(temp, "session", "session.json"), "utf8"),
+    ) as { path: string };
+    expect(await readFile(manifest.path, "utf8")).toContain(
+      "Repair the same task",
+    );
+  });
   it.each(["orchestrator", "implementer", "reviewer"] as const)(
     "registers only the %s allowlist and persists audit events",
     async (role) => {

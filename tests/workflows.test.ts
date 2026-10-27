@@ -64,6 +64,8 @@ describe("durable delivery workflows", () => {
       changesRequested?: boolean;
       mixedFailures?: boolean;
       blockedFirst?: boolean;
+      unknownEvidence?: boolean;
+      staleReview?: boolean;
     } = {},
   ) {
     const id = randomUUID();
@@ -100,7 +102,12 @@ describe("durable delivery workflows", () => {
           status:
             options.blockedFirst && attempt === 0 ? "blocked" : "submitted",
           summary: "Done",
-          evidence: [{ criterionId: "works", references: ["test"] }],
+          evidence: [
+            {
+              criterionId: "works",
+              references: [options.unknownEvidence ? "unknown" : "test"],
+            },
+          ],
         };
       },
       candidate: async ({ implementation }) => ({
@@ -129,7 +136,7 @@ describe("durable delivery workflows", () => {
         return {
           taskId: c.taskId,
           attempt,
-          revision: candidate.revision,
+          revision: options.staleReview ? "c".repeat(40) : candidate.revision,
           verdict:
             options.changesRequested || options.mixedFailures
               ? "changes_requested"
@@ -399,4 +406,34 @@ describe("durable delivery workflows", () => {
       expect(s.calls.filter((c) => c === "implement")).toHaveLength(2);
     });
   }, 60_000);
+
+  it.each(["unknownEvidence", "staleReview"] as const)(
+    "cannot complete with %s",
+    async (failure) => {
+      const s = await scenario({ [failure]: true });
+      await s.worker.runUntil(async () => {
+        await s.handle.executeUpdate("conversation", {
+          args: [{ id: "goal", text: "Do task" }],
+        });
+        await s.waitState("awaiting_approval");
+        await s.handle.executeUpdate("approve", {
+          args: [
+            {
+              commandId: "approve",
+              taskId: s.c.taskId,
+              version: 1,
+              configuration,
+            },
+          ],
+        });
+        const waiting = await s.waitState("waiting");
+        expect(waiting.acceptedResults).toEqual([]);
+        expect(waiting.pendingEscalation?.kind).toBe("recovery");
+        expect(s.calls).not.toContain("accept");
+        await s.handle.executeUpdate("cancel", { args: ["cancel"] });
+        await s.handle.result();
+      });
+    },
+    60_000,
+  );
 });
