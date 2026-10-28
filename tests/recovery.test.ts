@@ -11,7 +11,8 @@ import {
   bundleWorkflowCode,
 } from "@temporalio/worker";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { runtimeSchema, profileSchema } from "../src/configuration.js";
+import { runtimeSchema } from "../src/configuration.js";
+import { agentProfiles } from "./fixtures/profiles.js";
 import type {
   Activities,
   DeliveryContract,
@@ -61,18 +62,9 @@ describe.runIf(process.env.CLAITH_RECOVERY_TESTS === "1")(
       await git(project, "add", ".");
       await git(project, "commit", "-m", "seed");
       const startingRevision = await git(project, "rev-parse", "HEAD");
-      const profile = profileSchema.parse({
-        provider: "double",
-        model: "double",
-        instructions: "test",
-      });
       const configuration = {
         runtime: runtimeSchema.parse({ maxRepairs: 0 }),
-        agents: {
-          orchestrator: profile,
-          implementer: profile,
-          reviewer: profile,
-        },
+        agents: agentProfiles(),
       };
       let fail = true;
       let interrupted = true;
@@ -270,22 +262,13 @@ describe.runIf(process.env.CLAITH_RECOVERY_TESTS === "1")(
       await git(project, "add", ".");
       await git(project, "commit", "-m", "seed");
       const startingRevision = await git(project, "rev-parse", "HEAD");
-      const profile = profileSchema.parse({
-        provider: "double",
-        model: "double",
-        instructions: "test",
-      });
       const configuration = {
         runtime: runtimeSchema.parse({
           maxRepairs: 0,
           heartbeatIntervalSeconds: 1,
           heartbeatTimeoutSeconds: 3,
         }),
-        agents: {
-          orchestrator: profile,
-          implementer: profile,
-          reviewer: profile,
-        },
+        agents: agentProfiles(),
       };
       const marker = join(directory, `${id}-active`);
       const child = spawn(

@@ -3,9 +3,14 @@ import { join } from "node:path";
 import { parse, stringify } from "smol-toml";
 import { createDirectories } from "./infrastructure/directories.js";
 
-import { roles, profileSchema, runtimeSchema } from "./domain/configuration.js";
+import {
+  roles,
+  resolveProfile,
+  runtimeSchema,
+} from "./domain/configuration.js";
+import { rolePolicy } from "./domain/tools.js";
 import type {
-  AgentProfile,
+  ExecutionAgentProfile,
   ExecutionConfiguration,
   Role,
 } from "./domain/configuration.js";
@@ -31,15 +36,18 @@ export async function loadConfiguration(
     throw new Error(
       `Invalid settings in ${runtimePath}: ${runtime.error.message}`,
     );
-  const agents = {} as Record<Role, AgentProfile>;
+  const agents = {} as Record<Role, ExecutionAgentProfile>;
   for (const role of roles) {
     const path = join(configDir, "agents", `${role}.toml`);
-    const profile = profileSchema.safeParse(await loadToml(path));
-    if (!profile.success)
+    const value = await loadToml(path);
+    try {
+      agents[role] = resolveProfile(role, value);
+    } catch (error) {
       throw new Error(
-        `Invalid ${role} profile in ${path}: ${profile.error.message}`,
+        `Invalid ${role} profile in ${path}: ${String(error)}. Set permissions = "${rolePolicy[role].permissions}" and select a Pi provider/model.`,
+        { cause: error },
       );
-    agents[role] = profile.data;
+    }
   }
   return { runtime: runtime.data, agents };
 }
@@ -59,6 +67,7 @@ export async function initializeConfiguration(
           provider: "",
           model: "",
           reasoning: "medium",
+          permissions: rolePolicy[role].permissions,
           instructions: `You are Claith's ${role}. Follow the approved Delivery Contract and use your structured completion tool.`,
         }),
     ]);

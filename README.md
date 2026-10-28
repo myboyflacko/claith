@@ -63,12 +63,33 @@ unconfigured profiles fail with the filename and corrective action.
   log/
 ```
 
-Role profiles contain `provider`, `model`, `reasoning`, and `instructions`.
+Role profiles contain `provider`, `model`, `reasoning`, `instructions`, and a
+required `permissions` level. New profiles use `permissions = "read-only"` for
+orchestrator and reviewer, and `permissions = "read-write"` for implementer.
+Orchestrator and reviewer cannot use `read-write`; the implementer can be
+restricted to `read-only`. Profiles without `permissions` must be updated
+explicitly; `init` preserves existing files. Profiles do not contain tool lists.
+
+The central registry in `src/domain/tools.ts` assigns each tool a required
+permission level, allowed roles, and Pi/custom implementation source.
+`read-only` provides `read`, `grep`, `find`, and `ls`; `read-write` additionally
+provides `edit`, `write`, and Claith's logged, cancellable `bash` implementation.
+The reviewer also receives `read_diff`, and each role receives its own mandatory
+`submit_*` completion tool. Register new custom tools with their permission level
+and roles, and supply their implementation in the role activity. They become
+available to matching profiles without listing them in each profile. Unregistered
+custom tools, duplicate definitions, and overrides of Pi tools are rejected.
+
+Resolved tool names are saved with the execution configuration at approval.
+Registry additions and profile edits apply to subsequent approvals; resumed
+activities retain their saved selection. If a saved tool is removed or becomes
+disallowed, execution fails rather than silently changing its rights.
+
 Claith uses Pi's normal credential discovery; it does not move credentials or load
-skills, extensions, MCP servers, or arbitrary agent packages. Reviewer tools are
-`read`, `grep`, `find`, `ls`, `read_diff`, and `submit_review`. Implementer tools add
-`edit`, `write`, `bash`, and `submit_implementation`. These tools use the operator's
-host permissions; run Claith only on repositories and contracts you authorize.
+skills, extensions, MCP servers, or arbitrary agent packages. These tool levels
+are not filesystem or operating-system isolation. Tools use the operator's host
+permissions, including broad shell access through `bash`; run Claith only on
+repositories and contracts you authorize.
 
 Runtime defaults in `claith.toml`: `maxRepairs = 2`,
 `agentTimeoutSeconds = 1800`, `checkTimeoutSeconds = 600`,

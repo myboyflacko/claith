@@ -1,7 +1,9 @@
 import { z } from "zod";
+import { permissions, toolRegistry } from "./tools.js";
+import type { Role } from "./tools.js";
 
-export const roles = ["orchestrator", "implementer", "reviewer"] as const;
-export type Role = (typeof roles)[number];
+export { roles } from "./tools.js";
+export type { Role } from "./tools.js";
 const seconds = z.number().int().positive();
 export const runtimeSchema = z
   .strictObject({
@@ -26,18 +28,45 @@ export const profileSchema = z.strictObject({
     .enum(["off", "minimal", "low", "medium", "high", "xhigh"])
     .default("medium"),
   instructions: z.string().trim().min(1),
+  permissions: z.enum(permissions),
 });
 export type RuntimeSettings = z.infer<typeof runtimeSchema>;
 export type AgentProfile = z.infer<typeof profileSchema>;
+export function executionProfileSchema(role: Role) {
+  return profileSchema
+    .extend({ tools: z.array(z.string().min(1)) })
+    .superRefine((profile, ctx) => {
+      try {
+        toolRegistry.validate(role, profile.permissions, profile.tools);
+      } catch (error) {
+        ctx.addIssue({ code: "custom", message: (error as Error).message });
+      }
+    });
+}
+export type ExecutionAgentProfile = z.infer<
+  ReturnType<typeof executionProfileSchema>
+>;
+
+export function resolveProfile(
+  role: Role,
+  value: unknown,
+): ExecutionAgentProfile {
+  const profile = profileSchema.parse(value);
+  return executionProfileSchema(role).parse({
+    ...profile,
+    tools: toolRegistry.resolve(role, profile.permissions),
+  });
+}
+
 export interface ExecutionConfiguration {
   runtime: RuntimeSettings;
-  agents: Record<Role, AgentProfile>;
+  agents: Record<Role, ExecutionAgentProfile>;
 }
 export const executionConfigurationSchema = z.strictObject({
   runtime: runtimeSchema,
   agents: z.strictObject({
-    orchestrator: profileSchema,
-    implementer: profileSchema,
-    reviewer: profileSchema,
+    orchestrator: executionProfileSchema("orchestrator"),
+    implementer: executionProfileSchema("implementer"),
+    reviewer: executionProfileSchema("reviewer"),
   }),
 });

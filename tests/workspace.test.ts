@@ -2,7 +2,8 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { profileSchema, runtimeSchema } from "../src/configuration.js";
+import { runtimeSchema } from "../src/configuration.js";
+import { agentProfiles } from "./fixtures/profiles.js";
 import type {
   AttemptInput,
   Candidate,
@@ -33,11 +34,6 @@ beforeEach(async () => {
   await git(project, "add", ".");
   await git(project, "commit", "-m", "initial");
   const startingRevision = await git(project, "rev-parse", "HEAD");
-  const profile = profileSchema.parse({
-    provider: "double",
-    model: "double",
-    instructions: "test",
-  });
   input = {
     sessionId: "session",
     project,
@@ -46,11 +42,7 @@ beforeEach(async () => {
     dependencies: [],
     configuration: {
       runtime: runtimeSchema.parse({}),
-      agents: {
-        orchestrator: profile,
-        implementer: profile,
-        reviewer: profile,
-      },
+      agents: agentProfiles(),
     },
     contract: {
       taskId: "one",

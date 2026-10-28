@@ -15,7 +15,7 @@
 | `src/bootstrap.ts`                        | Directory-only startup initialization                                                    |
 | `src/settings.ts`                         | Central ~/.claith location                                                               |
 | `src/configuration.ts`                    | Validated TOML loading and non-overwriting explicit init                                 |
-| `src/domain/`                             | Runtime/profile schemas, contracts, session snapshots, evidence, and activity interfaces |
+| `src/domain/`                             | Runtime/profile schemas, tool registry, contracts, snapshots, and activity interfaces   |
 | `src/runtime/`                            | Temporal coordinator/child workflows, client, activities, and native worker              |
 | `src/workspace/`                          | Worktrees, ownership reconciliation, processes, candidate commits, and evidence storage  |
 | `src/agents/`                             | Pi role sessions, effective tool allowlists, structured completion, and audit logs       |

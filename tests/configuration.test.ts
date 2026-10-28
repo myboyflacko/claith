@@ -15,6 +15,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { bootstrap } from "../src/bootstrap.js";
 import { createDirectories } from "../src/infrastructure/directories.js";
 import { appSettings } from "../src/settings.js";
+import { parse } from "smol-toml";
+import { roles } from "../src/configuration.js";
 
 const execFileAsync = promisify(execFile);
 let temporaryDirectory: string;
@@ -144,6 +146,70 @@ describe("application startup", () => {
 });
 
 describe("runtime configuration", () => {
+  it("creates explicit permission profiles and snapshots their resolved tools", async () => {
+    const { initializeConfiguration, loadConfiguration } =
+      await import("../src/configuration.js");
+    await initializeConfiguration(temporaryDirectory);
+    for (const role of roles) {
+      const path = join(temporaryDirectory, "agents", `${role}.toml`);
+      const template = await readFile(path, "utf8");
+      expect(parse(template)).toMatchObject({
+        permissions: role === "implementer" ? "read-write" : "read-only",
+      });
+      expect(parse(template)).not.toHaveProperty("tools");
+      await writeFile(
+        path,
+        template
+          .replace('provider = ""', 'provider = "test"')
+          .replace('model = ""', 'model = "test"'),
+      );
+    }
+    const saved = await loadConfiguration(temporaryDirectory);
+    expect(saved.agents.implementer.tools).toContain("bash");
+    expect(saved.agents.reviewer.tools).toContain("read_diff");
+    const path = join(temporaryDirectory, "agents", "implementer.toml");
+    await writeFile(
+      path,
+      (await readFile(path, "utf8")).replace(
+        'permissions = "read-write"',
+        'permissions = "read-only"',
+      ),
+    );
+    expect(
+      (await loadConfiguration(temporaryDirectory)).agents.implementer.tools,
+    ).not.toContain("bash");
+    expect(saved.agents.implementer.tools).toContain("bash");
+  });
+
+  it.each([
+    ["orchestrator", "", "permissions"],
+    ["orchestrator", 'permissions = "read-write"', "must be read-only"],
+    ["reviewer", 'permissions = "read-write"', "must be read-only"],
+    ["orchestrator", 'permissions = "all"', "permissions"],
+    [
+      "orchestrator",
+      'permissions = "read-only"\ntools = ["bash"]',
+      "Unrecognized key",
+    ],
+  ])("rejects invalid rights in %s: %s", async (role, permissions, message) => {
+    const { initializeConfiguration, loadConfiguration } =
+      await import("../src/configuration.js");
+    await initializeConfiguration(temporaryDirectory);
+    for (const name of roles) {
+      await writeFile(
+        join(temporaryDirectory, "agents", `${name}.toml`),
+        'provider = "test"\nmodel = "test"\ninstructions = "test"\n' +
+          (role === name ? permissions : 'permissions = "read-only"'),
+      );
+    }
+    await expect(loadConfiguration(temporaryDirectory)).rejects.toThrow(
+      message,
+    );
+    await expect(loadConfiguration(temporaryDirectory)).rejects.toThrow(
+      `${role}.toml`,
+    );
+  });
+
   it("creates templates without overwriting user files and requires explicit models", async () => {
     const { initializeConfiguration, loadConfiguration } =
       await import("../src/configuration.js");
@@ -156,7 +222,7 @@ describe("runtime configuration", () => {
     for (const role of ["orchestrator", "implementer", "reviewer"]) {
       await writeFile(
         join(temporaryDirectory, "agents", `${role}.toml`),
-        'provider = "test"\nmodel = "model"\ninstructions = "Follow contract"\n',
+        'provider = "test"\nmodel = "model"\ninstructions = "Follow contract"\npermissions = "read-only"\n',
       );
     }
     await initializeConfiguration(temporaryDirectory);

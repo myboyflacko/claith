@@ -14,6 +14,8 @@ import type {
   ResourceLoader,
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
+import { executionProfileSchema } from "../domain/configuration.js";
+import { rolePolicy, toolRegistry } from "../domain/tools.js";
 import type { Role } from "../configuration.js";
 import { contractSchema, identity, revision } from "../domain/contracts.js";
 import type {
@@ -75,21 +77,6 @@ export interface RoleSession {
 export type SessionFactory = (
   options: CreateAgentSessionOptions,
 ) => Promise<{ session: RoleSession }>;
-export const roleTools: Record<Role, string[]> = {
-  orchestrator: ["read", "grep", "find", "ls", "submit_proposal"],
-  implementer: [
-    "read",
-    "grep",
-    "find",
-    "ls",
-    "edit",
-    "write",
-    "bash",
-    "submit_implementation",
-  ],
-  reviewer: ["read", "grep", "find", "ls", "read_diff", "submit_review"],
-};
-
 function resources(prompt: string): ResourceLoader {
   return {
     getExtensions: () => ({
@@ -143,17 +130,12 @@ export async function runRole<T>(
   request: RoleRequest<T>,
   factory: SessionFactory = createAgentSession,
 ): Promise<T> {
-  await mkdir(request.directory, { recursive: true });
+  const profile = executionProfileSchema(request.role).parse(request.profile);
   if (request.signal?.aborted)
     throw new Error("Agent cancelled before dispatch");
   let submission: T | null = null;
   let failure = "No structured submission";
-  const completionName =
-    request.role === "orchestrator"
-      ? "submit_proposal"
-      : request.role === "implementer"
-        ? "submit_implementation"
-        : "submit_review";
+  const completionName = rolePolicy[request.role].completion;
   const completion: ToolDefinition = {
     name: completionName,
     label: completionName,
@@ -186,6 +168,25 @@ export async function runRole<T>(
       }
     },
   };
+  const definitions = new Map<string, ToolDefinition>();
+  for (const definition of [...(request.customTools ?? []), completion]) {
+    if (toolRegistry.get(definition.name)?.source !== "custom")
+      throw new Error(
+        `Unregistered custom tool or Pi tool override: ${definition.name}`,
+      );
+    if (definitions.has(definition.name))
+      throw new Error(`Duplicate custom tool: ${definition.name}`);
+    definitions.set(definition.name, definition);
+  }
+  const customTools = profile.tools
+    .filter((name) => toolRegistry.get(name)!.source === "custom")
+    .map((name) => {
+      const definition = definitions.get(name);
+      if (!definition)
+        throw new Error(`Missing custom tool implementation: ${name}`);
+      return definition;
+    });
+  await mkdir(request.directory, { recursive: true });
   const sessionFile = join(request.directory, "session.json");
   const prior = await readJson<{ path: string }>(sessionFile);
   const manager = prior
@@ -193,32 +194,29 @@ export async function runRole<T>(
     : SessionManager.create(request.cwd, request.directory);
   const modelRuntime =
     factory === createAgentSession ? await ModelRuntime.create() : undefined;
-  const model = modelRuntime?.getModel(
-    request.profile.provider,
-    request.profile.model,
-  );
+  const model = modelRuntime?.getModel(profile.provider, profile.model);
   if (
     modelRuntime &&
-    (!model || !modelRuntime.hasConfiguredAuth(request.profile.provider))
+    (!model || !modelRuntime.hasConfiguredAuth(profile.provider))
   ) {
     throw new Error(
-      `Pi model/authentication unavailable: ${request.profile.provider}/${request.profile.model}; configure your existing Pi login and role profile`,
+      `Pi model/authentication unavailable: ${profile.provider}/${profile.model}; configure your existing Pi login and role profile`,
     );
   }
   const { session } = await factory({
     cwd: request.cwd,
     ...(modelRuntime ? { modelRuntime } : {}),
     ...(model ? { model } : {}),
-    thinkingLevel: request.profile.reasoning,
-    tools: [...roleTools[request.role]],
-    customTools: [...(request.customTools ?? []), completion],
+    thinkingLevel: profile.reasoning,
+    tools: [...profile.tools],
+    customTools,
     sessionManager: manager,
     settingsManager: SettingsManager.inMemory({
       compaction: { enabled: true },
       retry: { enabled: false },
     }),
     resourceLoader: resources(
-      `${request.profile.instructions}\n\n${await repositoryContext(request.cwd)}\n\n${
+      `${profile.instructions}\n\n${await repositoryContext(request.cwd)}\n\n${
         request.role === "orchestrator"
           ? "Concretize only the next task. Preserve explicit dependencies. Propose local-commit contracts; never approve or execute them. Use increasing versions for revised contracts. Explain completion or ask for clarification when needed."
           : request.role === "implementer"

@@ -39,7 +39,7 @@ beforeEach(async () => {
   for (const role of ["orchestrator", "implementer", "reviewer"]) {
     await writeFile(
       join(root, "agents", `${role}.toml`),
-      'provider = "double"\nmodel = "double"\ninstructions = "test"\n',
+      `provider = "double"\nmodel = "double"\ninstructions = "test"\npermissions = "${role === "implementer" ? "read-write" : "read-only"}"\n`,
     );
   }
   vi.clearAllMocks();

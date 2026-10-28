@@ -38,6 +38,12 @@ import {
 function reject(message: string): never {
   throw ApplicationFailure.nonRetryable(message, "InvalidCommand");
 }
+function validatedConfiguration(value: SessionInput["configuration"]) {
+  const result = executionConfigurationSchema.safeParse(value);
+  if (!result.success)
+    reject(`Invalid execution configuration: ${result.error.message}`);
+  return result.data;
+}
 function activities(input: { configuration: SessionInput["configuration"] }) {
   const s = input.configuration.runtime;
   return proxyActivities<Activities>({
@@ -51,7 +57,7 @@ function activities(input: { configuration: SessionInput["configuration"] }) {
 export async function coordinator(
   input: SessionInput,
 ): Promise<SessionSnapshot> {
-  input.configuration = executionConfigurationSchema.parse(input.configuration);
+  input.configuration = validatedConfiguration(input.configuration);
   const snapshot: SessionSnapshot = {
     sessionId: input.sessionId,
     project: input.project,
@@ -122,9 +128,7 @@ export async function coordinator(
       )
         reject("Stale or unavailable contract");
       const executionId = `${input.sessionId}-${c.taskId}-v${c.version}`;
-      request.configuration = executionConfigurationSchema.parse(
-        request.configuration,
-      );
+      request.configuration = validatedConfiguration(request.configuration);
       approval = request;
       approvals.set(approvedKey, executionId);
       repairBudgets.set(executionId, request.configuration.runtime.maxRepairs);
@@ -348,6 +352,7 @@ export async function coordinator(
 export async function taskExecution(
   input: TaskInput,
 ): Promise<TaskResult | null> {
+  input.configuration = validatedConfiguration(input.configuration);
   const act = activities(input);
   const state: TaskSnapshot = {
     executionId: input.executionId,

@@ -1,15 +1,17 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
+import { Type } from "typebox";
 import type {
   CreateAgentSessionOptions,
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-import { roleTools, runRole } from "../src/agents/pi.js";
+import { runRole } from "../src/agents/pi.js";
 import type { RoleRequest, SessionFactory } from "../src/agents/pi.js";
 import type { Role } from "../src/configuration.js";
+import { agentProfile } from "./fixtures/profiles.js";
 
 let temp: string;
 beforeEach(async () => {
@@ -25,17 +27,28 @@ function request(role: Role = "implementer"): RoleRequest<{ task: string }> {
     cwd: temp,
     directory: join(temp, "session"),
     logPath: join(temp, "events.jsonl"),
-    profile: {
-      provider: "double",
-      model: "double",
-      reasoning: "medium",
-      instructions: "Test role",
-    },
+    profile: agentProfile(role),
+    customTools:
+      role === "orchestrator"
+        ? []
+        : [customTool(role === "implementer" ? "bash" : "read_diff")],
     schema: z.strictObject({ task: z.string() }),
     validate: (v) => {
       if (v.task !== "current") throw new Error("Stale task");
     },
     prompt: "Execute current task",
+  };
+}
+function customTool(name: string): ToolDefinition {
+  return {
+    name,
+    label: name,
+    description: "Test tool",
+    parameters: Type.Object({}),
+    execute: async () => ({
+      content: [{ type: "text", text: "done" }],
+      details: {},
+    }),
   };
 }
 async function submit(tool: ToolDefinition, result: unknown) {
@@ -47,7 +60,101 @@ async function submit(tool: ToolDefinition, result: unknown) {
     undefined as never,
   );
 }
+function successfulFactory(
+  receive: (options: CreateAgentSessionOptions) => void = () => {},
+): SessionFactory {
+  return async (options) => {
+    receive(options);
+    return {
+      session: {
+        subscribe: () => () => {},
+        abort: async () => {},
+        dispose: () => {},
+        prompt: async (text) => {
+          options.sessionManager!.appendMessage({
+            role: "user",
+            content: text,
+            timestamp: Date.now(),
+          });
+          await submit(options.customTools!.at(-1)!, { task: "current" });
+        },
+      },
+    };
+  };
+}
 describe("Pi role protocol without paid calls", () => {
+  it("filters supplied custom tools using the saved role permissions", async () => {
+    const input = request();
+    input.profile = agentProfile("implementer", { permissions: "read-only" });
+    input.customTools!.push(customTool("read_diff"));
+    const received: CreateAgentSessionOptions[] = [];
+    await runRole(
+      input,
+      successfulFactory((options) => received.push(options)),
+    );
+    expect(received[0]!.tools).toEqual([
+      "read",
+      "grep",
+      "find",
+      "ls",
+      "submit_implementation",
+    ]);
+    expect(received[0]!.customTools!.map((tool) => tool.name)).toEqual([
+      "submit_implementation",
+    ]);
+  });
+
+  it("keeps a saved tool subset when resuming instead of resolving the current registry", async () => {
+    const input = request("reviewer");
+    input.profile.tools = ["read", "submit_review"];
+    const received: CreateAgentSessionOptions[] = [];
+    const factory = successfulFactory((options) => received.push(options));
+    await runRole(input, factory);
+    await runRole(input, factory);
+    expect(received[0]!.sessionManager!.getSessionId()).toBe(
+      received[1]!.sessionManager!.getSessionId(),
+    );
+    for (const options of received) {
+      expect(options.tools).toEqual(["read", "submit_review"]);
+      expect(options.customTools!.map((tool) => tool.name)).toEqual([
+        "submit_review",
+      ]);
+    }
+  });
+
+  it.each(["orchestrator", "reviewer"] as const)(
+    "rejects elevated %s permissions before creating a session",
+    async (role) => {
+      const input = request(role);
+      input.profile.permissions = "read-write";
+      const factory = vi.fn(successfulFactory());
+      await expect(runRole(input, factory)).rejects.toThrow(
+        "must be read-only",
+      );
+      expect(factory).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    [["unregistered"], "Unregistered custom tool"],
+    [["read"], "Pi tool override"],
+    [["bash", "bash"], "Duplicate custom tool: bash"],
+    [
+      ["bash", "submit_implementation"],
+      "Duplicate custom tool: submit_implementation",
+    ],
+    [[], "Missing custom tool implementation: bash"],
+  ] as const)(
+    "rejects unsafe custom tool definitions %j",
+    async (names, message) => {
+      const input = request();
+      input.customTools = names.map(customTool);
+      const factory = vi.fn(successfulFactory());
+      await expect(runRole(input, factory)).rejects.toThrow(message);
+      expect(factory).not.toHaveBeenCalled();
+    },
+  );
+
   it("resumes the implementer transcript for repairs and opens distinct reviewer sessions", async () => {
     const ids: string[] = [];
     const factory: SessionFactory = async (options) => {
@@ -114,7 +221,28 @@ describe("Pi role protocol without paid calls", () => {
       expect(await runRole(request(role), factory)).toEqual({
         task: "current",
       });
-      expect(received!.tools).toEqual(roleTools[role]);
+      const expected = {
+        orchestrator: ["read", "grep", "find", "ls", "submit_proposal"],
+        implementer: [
+          "read",
+          "grep",
+          "find",
+          "ls",
+          "edit",
+          "write",
+          "bash",
+          "submit_implementation",
+        ],
+        reviewer: ["read", "grep", "find", "ls", "read_diff", "submit_review"],
+      };
+      expect(received!.tools).toEqual(expected[role]);
+      expect(received!.customTools!.map((tool) => tool.name)).toEqual(
+        role === "orchestrator"
+          ? ["submit_proposal"]
+          : role === "implementer"
+            ? ["bash", "submit_implementation"]
+            : ["read_diff", "submit_review"],
+      );
       expect(received!.resourceLoader!.getExtensions().extensions).toEqual([]);
       expect(received!.resourceLoader!.getSkills().skills).toEqual([]);
       if (role === "reviewer")

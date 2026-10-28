@@ -3,7 +3,9 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { TestWorkflowEnvironment } from "@temporalio/testing";
 import { Worker } from "@temporalio/worker";
-import { profileSchema, runtimeSchema } from "../src/configuration.js";
+import { runtimeSchema } from "../src/configuration.js";
+import type { ExecutionConfiguration } from "../src/configuration.js";
+import { agentProfile, agentProfiles } from "./fixtures/profiles.js";
 import type {
   Activities,
   DeliveryContract,
@@ -12,23 +14,7 @@ import type {
 
 export const configuration = {
   runtime: runtimeSchema.parse({ reminderSeconds: 3600 }),
-  agents: {
-    orchestrator: profileSchema.parse({
-      provider: "double",
-      model: "double",
-      instructions: "test",
-    }),
-    implementer: profileSchema.parse({
-      provider: "double",
-      model: "double",
-      instructions: "test",
-    }),
-    reviewer: profileSchema.parse({
-      provider: "double",
-      model: "double",
-      instructions: "test",
-    }),
-  },
+  agents: agentProfiles(),
 };
 export const contract: DeliveryContract = {
   taskId: "task-one",
@@ -70,6 +56,7 @@ describe("durable delivery workflows", () => {
   ) {
     const id = randomUUID();
     const calls: string[] = [];
+    const dispatchedConfigurations: ExecutionConfiguration[] = [];
     const c = structuredClone(contract);
     c.review = options.review ?? true;
     if (options.human)
@@ -96,8 +83,9 @@ describe("durable delivery workflows", () => {
         calls.push("prepare");
         return workspace;
       },
-      implement: async ({ attempt }) => {
+      implement: async ({ attempt, configuration }) => {
         calls.push("implement");
+        dispatchedConfigurations.push(configuration);
         return {
           status:
             options.blockedFirst && attempt === 0 ? "blocked" : "submitted",
@@ -131,8 +119,9 @@ describe("durable delivery workflows", () => {
           },
         ];
       },
-      review: async ({ attempt, candidate }) => {
+      review: async ({ attempt, candidate, configuration }) => {
         calls.push("review");
+        dispatchedConfigurations.push(configuration);
         return {
           taskId: c.taskId,
           attempt,
@@ -180,7 +169,16 @@ describe("durable delivery workflows", () => {
         `Did not reach ${state}: ${JSON.stringify(await status())}`,
       );
     };
-    return { id, calls, c, worker, handle, status, waitState };
+    return {
+      id,
+      calls,
+      c,
+      worker,
+      handle,
+      status,
+      waitState,
+      dispatchedConfigurations,
+    };
   }
 
   it.each([true, false])(
@@ -205,11 +203,32 @@ describe("durable delivery workflows", () => {
             ],
           }),
         ).rejects.toThrow();
+        const invalid = structuredClone(configuration);
+        invalid.agents.reviewer.permissions = "read-write";
+        await expect(
+          s.handle.executeUpdate("approve", {
+            args: [
+              {
+                commandId: "invalid-permissions",
+                taskId: s.c.taskId,
+                version: 1,
+                configuration: invalid,
+              },
+            ],
+          }),
+        ).rejects.toThrow();
+        expect(s.calls).toEqual([]);
+        const approvedConfiguration = structuredClone(configuration);
+        approvedConfiguration.agents.implementer = agentProfile("implementer", {
+          permissions: "read-only",
+        });
+        // A saved snapshot may predate tools now present in the registry.
+        approvedConfiguration.agents.reviewer.tools = ["read", "submit_review"];
         const approval = {
           commandId: "approve",
           taskId: s.c.taskId,
           version: 1,
-          configuration,
+          configuration: approvedConfiguration,
         };
         const execution = await s.handle.executeUpdate("approve", {
           args: [approval],
@@ -222,6 +241,9 @@ describe("durable delivery workflows", () => {
         expect(result.acceptedResults[0]?.acceptedCommit).toBe("b".repeat(40));
         expect(s.calls.filter((c) => c === "implement")).toHaveLength(1);
         expect(s.calls.includes("review")).toBe(review);
+        expect(s.dispatchedConfigurations).toHaveLength(review ? 2 : 1);
+        for (const dispatched of s.dispatchedConfigurations)
+          expect(dispatched).toEqual(approvedConfiguration);
       });
     },
     60_000,
