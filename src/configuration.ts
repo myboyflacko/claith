@@ -30,7 +30,7 @@ async function loadToml(path: string): Promise<unknown> {
 export async function loadConfiguration(
   configDir: string,
 ): Promise<ExecutionConfiguration> {
-  const runtimePath = join(configDir, "claith.toml");
+  const runtimePath = join(configDir, "config.toml");
   const runtime = runtimeSchema.safeParse(await loadToml(runtimePath));
   if (!runtime.success)
     throw new Error(
@@ -57,7 +57,7 @@ export async function initializeConfiguration(
 ): Promise<void> {
   await createDirectories(configDir);
   const templates: [string, string][] = [
-    ["claith.toml", stringify(runtimeSchema.parse({}))],
+    ["config.toml", stringify(runtimeSchema.parse({}))],
   ];
   for (const role of roles) {
     templates.push([

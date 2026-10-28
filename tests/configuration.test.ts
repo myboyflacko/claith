@@ -52,14 +52,14 @@ describe("configuration directories", () => {
   it("preserves existing contents and restores missing directories on repeated calls", async () => {
     const configDir = join(temporaryDirectory, ".claith");
     await createDirectories(configDir);
-    await writeFile(join(configDir, "claith.toml"), "existing configuration");
+    await writeFile(join(configDir, "config.toml"), "existing configuration");
     await writeFile(join(configDir, "agents", "custom.md"), "existing agent");
     await rm(join(configDir, "sessions"), { recursive: true });
 
     await createDirectories(configDir);
     await createDirectories(configDir);
 
-    expect(await readFile(join(configDir, "claith.toml"), "utf8")).toBe(
+    expect(await readFile(join(configDir, "config.toml"), "utf8")).toBe(
       "existing configuration",
     );
     expect(await readFile(join(configDir, "agents", "custom.md"), "utf8")).toBe(
@@ -150,6 +150,9 @@ describe("runtime configuration", () => {
     const { initializeConfiguration, loadConfiguration } =
       await import("../src/configuration.js");
     await initializeConfiguration(temporaryDirectory);
+    const entries = await readdir(temporaryDirectory);
+    expect(entries).toContain("config.toml");
+    expect(entries).not.toContain("claith.toml");
     for (const role of roles) {
       const path = join(temporaryDirectory, "agents", `${role}.toml`);
       const template = await readFile(path, "utf8");
@@ -217,8 +220,13 @@ describe("runtime configuration", () => {
     await expect(loadConfiguration(temporaryDirectory)).rejects.toThrow(
       "Select a Pi provider",
     );
-    const runtimeFile = join(temporaryDirectory, "claith.toml");
+    const runtimeFile = join(temporaryDirectory, "config.toml");
     await writeFile(runtimeFile, "maxRepairs = 1\n");
+    // Leftover files from older installations must not affect current settings.
+    await writeFile(
+      join(temporaryDirectory, "claith.toml"),
+      "maxRepairs = 9\n",
+    );
     for (const role of ["orchestrator", "implementer", "reviewer"]) {
       await writeFile(
         join(temporaryDirectory, "agents", `${role}.toml`),
@@ -243,21 +251,21 @@ describe("runtime configuration", () => {
     const { initializeConfiguration, loadConfiguration } =
       await import("../src/configuration.js");
     await expect(loadConfiguration(temporaryDirectory)).rejects.toThrow(
-      "claith.toml",
+      "config.toml",
     );
     await initializeConfiguration(temporaryDirectory);
-    await writeFile(join(temporaryDirectory, "claith.toml"), "broken = [");
+    await writeFile(join(temporaryDirectory, "config.toml"), "broken = [");
     await expect(loadConfiguration(temporaryDirectory)).rejects.toThrow(
       "Cannot load",
     );
     await writeFile(
-      join(temporaryDirectory, "claith.toml"),
+      join(temporaryDirectory, "config.toml"),
       "heartbeatIntervalSeconds = 30",
     );
     await expect(loadConfiguration(temporaryDirectory)).rejects.toThrow(
       "heartbeatIntervalSeconds",
     );
-    await writeFile(join(temporaryDirectory, "claith.toml"), "");
+    await writeFile(join(temporaryDirectory, "config.toml"), "");
     await rm(join(temporaryDirectory, "agents", "orchestrator.toml"));
     await expect(loadConfiguration(temporaryDirectory)).rejects.toThrow(
       "orchestrator.toml",

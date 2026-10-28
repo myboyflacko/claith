@@ -53,9 +53,14 @@ Ordinary startup creates five directories and no configuration files. `init` cre
 missing templates without overwriting existing files. Invalid TOML and missing or
 unconfigured profiles fail with the filename and corrective action.
 
+Runtime settings are read only from `config.toml`. When upgrading, transfer the
+settings from `claith.toml` into `config.toml`, then remove `claith.toml`. Replace
+any legacy `[agents]`/`[workflow]` configuration with the current runtime settings;
+agent profiles remain separate files at the fixed paths below.
+
 ```text
 ~/.claith/
-  claith.toml
+  config.toml
   agents/{orchestrator,implementer,reviewer}.toml
   skills/
   sessions/<project-id>/<session-id>/<execution-id>/
@@ -91,7 +96,7 @@ are not filesystem or operating-system isolation. Tools use the operator's host
 permissions, including broad shell access through `bash`; run Claith only on
 repositories and contracts you authorize.
 
-Runtime defaults in `claith.toml`: `maxRepairs = 2`,
+Runtime defaults in `config.toml`: `maxRepairs = 2`,
 `agentTimeoutSeconds = 1800`, `checkTimeoutSeconds = 600`,
 `heartbeatIntervalSeconds = 10`, `heartbeatTimeoutSeconds = 30`,
 `reminderSeconds = 3600`, `address = "127.0.0.1:7233"`,
