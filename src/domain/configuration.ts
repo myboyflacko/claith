@@ -58,14 +58,15 @@ export function resolveProfile(
   });
 }
 
+export const executionRoles = ["implementer", "reviewer"] as const;
+export type ExecutionRole = (typeof executionRoles)[number];
 export interface ExecutionConfiguration {
   runtime: RuntimeSettings;
-  agents: Record<Role, ExecutionAgentProfile>;
+  agents: Record<ExecutionRole, ExecutionAgentProfile>;
 }
 export const executionConfigurationSchema = z.strictObject({
   runtime: runtimeSchema,
   agents: z.strictObject({
-    orchestrator: executionProfileSchema("orchestrator"),
     implementer: executionProfileSchema("implementer"),
     reviewer: executionProfileSchema("reviewer"),
   }),

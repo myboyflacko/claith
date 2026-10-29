@@ -1,556 +1,325 @@
 import {
   ActivityCancellationType,
+  ApplicationFailure,
   CancellationScope,
   ChildWorkflowCancellationType,
   condition,
   executeChild,
-  getExternalWorkflowHandle,
   isCancellation,
   proxyActivities,
   setHandler,
-  workflowInfo,
-  ApplicationFailure,
 } from "@temporalio/workflow";
-import { contractSchema } from "../domain/contracts.js";
 import { executionConfigurationSchema } from "../domain/configuration.js";
+import {
+  assertReview,
+  checksPassed,
+  contractSchema,
+  runIdentity,
+} from "../domain/contracts.js";
 import type {
   Activities,
-  Approval,
-  Decision,
-  Escalation,
-  SessionInput,
-  SessionSnapshot,
-  TaskInput,
-  TaskResult,
-  TaskSnapshot,
+  AttemptInput,
+  BlockKind,
+  ImplementerResult,
+  ReviewInput,
+  RunInput,
+  RunRecord,
+  Resume,
 } from "../domain/contracts.js";
-import {
-  approveUpdate,
-  cancelUpdate,
-  conversationUpdate,
-  decisionSignal,
-  decisionUpdate,
-  progressSignal,
-  statusQuery,
-  taskCancelSignal,
-} from "./messages.js";
-
-function reject(message: string): never {
-  throw ApplicationFailure.nonRetryable(message, "InvalidCommand");
-}
-function validatedConfiguration(value: SessionInput["configuration"]) {
-  const result = executionConfigurationSchema.safeParse(value);
-  if (!result.success)
-    reject(`Invalid execution configuration: ${result.error.message}`);
-  return result.data;
-}
-function activities(input: { configuration: SessionInput["configuration"] }) {
-  const s = input.configuration.runtime;
+import { cancelUpdate, resumeUpdate, statusQuery } from "./messages.js";
+function activities(input: RunInput) {
   return proxyActivities<Activities>({
-    startToCloseTimeout: `${s.agentTimeoutSeconds}s`,
-    heartbeatTimeout: `${s.heartbeatTimeoutSeconds}s`,
+    startToCloseTimeout: `${input.configuration.runtime.agentTimeoutSeconds}s`,
+    heartbeatTimeout: `${input.configuration.runtime.heartbeatTimeoutSeconds}s`,
     retry: { maximumAttempts: 1 },
     cancellationType: ActivityCancellationType.WAIT_CANCELLATION_COMPLETED,
   });
 }
-
-export async function coordinator(
-  input: SessionInput,
-): Promise<SessionSnapshot> {
-  input.configuration = validatedConfiguration(input.configuration);
-  const snapshot: SessionSnapshot = {
-    sessionId: input.sessionId,
-    project: input.project,
-    state: "idle",
-    currentTask: null,
-    pendingEscalation: null,
-    proposal: null,
-    acceptedResults: [],
-    conversation: [],
-    messages: [],
-    outline: [],
-  };
-  const receipts = new Map<string, { fingerprint: string; value: string }>();
-  const approvals = new Map<string, string>();
-  const repairBudgets = new Map<string, number>();
-  const versions = new Map<string, number>();
-  const resolvedQuestions = new Set<string>();
-  const queue: string[] = [];
-  let approval: Approval | null = null;
-  let busy = false;
-  let cancelled = false;
-  let questionSequence = 0;
-  const scope = new CancellationScope();
-  function once(id: string, payload: unknown, action: () => string): string {
-    const fingerprint = JSON.stringify(payload);
-    const old = receipts.get(id);
-    if (old) {
-      if (old.fingerprint !== fingerprint)
-        reject("Command ID reused with different content");
-      return old.value;
-    }
-    const value = action();
-    receipts.set(id, { fingerprint, value });
-    return value;
+export async function implementerWorkflow(
+  input: AttemptInput,
+): Promise<ImplementerResult> {
+  const act = activities(input);
+  const implementation = await act.implement(input);
+  if (implementation.submission.status === "blocked")
+    return { implementation, candidate: null, checks: [] };
+  const candidate = await act.candidate(input);
+  const checks = await act.check({ ...input, candidate, checks: [] });
+  return { implementation, candidate, checks };
+}
+export async function reviewerWorkflow(input: ReviewInput) {
+  const result = await activities(input).review(input);
+  try {
+    assertReview(input, result.submission);
+  } catch (error) {
+    throw ApplicationFailure.nonRetryable(errorText(error), "InvalidReview");
   }
-  setHandler(statusQuery, () => snapshot);
-  setHandler(conversationUpdate, (message) =>
-    once(message.id, message, () => {
-      if (cancelled || snapshot.state === "completed")
-        reject("Session is closed");
-      if (
-        busy ||
-        snapshot.pendingEscalation ||
-        snapshot.currentTask?.state === "running" ||
-        snapshot.currentTask?.state === "waiting"
-      )
-        reject("Wait for the active task or answer its question");
-      if (!message.text.trim()) reject("Conversation cannot be empty");
-      snapshot.conversation.push(message);
-      queue.push(message.id);
-      snapshot.state = "planning";
-      return message.id;
-    }),
+  return result;
+}
+function errorText(error: unknown): string {
+  if (!(error instanceof Error)) return String(error);
+  return `${error.message}${error.cause ? `: ${errorText(error.cause)}` : ""}`;
+}
+export async function taskWorkflow(input: RunInput): Promise<RunRecord> {
+  const contract = contractSchema.safeParse(input.contract);
+  const configuration = executionConfigurationSchema.safeParse(
+    input.configuration,
   );
-  setHandler(approveUpdate, (request) =>
-    once(request.commandId, request, () => {
-      const approvedKey = `${request.taskId}:${request.version}`;
-      if (approvals.has(approvedKey)) return approvals.get(approvedKey)!;
-      const c = snapshot.proposal?.contract;
-      if (
-        busy ||
-        queue.length ||
-        approval ||
-        snapshot.state !== "awaiting_approval" ||
-        !c ||
-        c.taskId !== request.taskId ||
-        c.version !== request.version
-      )
-        reject("Stale or unavailable contract");
-      const executionId = `${input.sessionId}-${c.taskId}-v${c.version}`;
-      request.configuration = validatedConfiguration(request.configuration);
-      approval = request;
-      approvals.set(approvedKey, executionId);
-      repairBudgets.set(executionId, request.configuration.runtime.maxRepairs);
-      snapshot.state = "running";
-      snapshot.currentTask = {
-        executionId,
-        contract: c,
-        attempt: 0,
-        repairsUsed: 0,
-        state: "running",
-      };
-      return executionId;
-    }),
-  );
-  setHandler(progressSignal, (task, question) => {
+  if (
+    !contract.success ||
+    !configuration.success ||
+    !runIdentity.safeParse(input.runId).success
+  )
+    throw ApplicationFailure.nonRetryable("Invalid task input", "InvalidInput");
+  input = {
+    ...input,
+    contract: contract.data,
+    configuration: configuration.data,
+  };
+  const record: RunRecord = {
+    contract: input.contract,
+    execution: {
+      runId: input.runId,
+      project: input.project,
+      configuration: input.configuration,
+      status: "running",
+      stage: "prepare",
+      repairsUsed: 0,
+      repairBudget: input.configuration.runtime.maxRepairs,
+      blocked: null,
+      workspace: null,
+      sessions: [],
+      attempts: [],
+      integration: null,
+      pushed: false,
+      cleaned: false,
+    },
+  };
+  const e = record.execution;
+  const act = activities(input);
+  const scope = new CancellationScope();
+  let cancelled = false;
+  let sequence = 0;
+  let resumed = false;
+  const receipts = new Map<string, { fingerprint: string; result: string }>();
+  function reject(message: string): never {
+    throw ApplicationFailure.nonRetryable(message, "InvalidCommand");
+  }
+  setHandler(statusQuery, () => record);
+  setHandler(resumeUpdate, (command: Resume) => {
+    const fingerprint = JSON.stringify(command);
+    const prior = receipts.get(command.commandId);
+    if (prior) {
+      if (prior.fingerprint !== fingerprint)
+        reject("Command ID reused with different content");
+      return prior.result;
+    }
     if (
-      !cancelled &&
-      snapshot.currentTask?.executionId === task.executionId &&
-      (!question || !resolvedQuestions.has(question.id))
-    ) {
-      snapshot.currentTask = task;
-      snapshot.pendingEscalation = question;
-      snapshot.state = task.state === "waiting" ? "waiting" : "running";
-    }
+      cancelled ||
+      !e.blocked ||
+      e.status !== "blocked" ||
+      resumed ||
+      command.blockerId !== e.blocked.id
+    )
+      reject("Stale blocker or closed run");
+    if (e.blocked.kind === "base_changed")
+      reject("New contract version and run required for changed dev");
+    if (
+      !Number.isInteger(command.additionalRepairs) ||
+      command.additionalRepairs < 0 ||
+      command.additionalRepairs > 20
+    )
+      reject("additionalRepairs must be 0..20");
+    if (e.blocked.kind === "repair" && command.additionalRepairs < 1)
+      reject("Repair budget exhausted; explicitly grant additional repairs");
+    e.repairBudget += command.additionalRepairs;
+    resumed = true;
+    receipts.set(command.commandId, { fingerprint, result: command.blockerId });
+    return command.blockerId;
   });
-  setHandler(decisionUpdate, async (decision) => {
-    let dispatch = false;
-    const value = once(decision.commandId, decision, () => {
-      const q = snapshot.pendingEscalation;
-      if (
-        !q ||
-        q.id !== decision.escalationId ||
-        q.executionId !== decision.executionId
-      )
-        reject("Stale question or execution");
-      if (
-        !Number.isInteger(decision.additionalRepairs) ||
-        decision.additionalRepairs < 0 ||
-        decision.additionalRepairs > 20
-      )
-        reject("Continuation requires 0..20 additional repairs");
-      if (decision.confirmCriteria.some((id) => !q.criteria.includes(id)))
-        reject("Unknown acceptance criterion");
-      if (
-        q.kind === "acceptance" &&
-        (decision.additionalRepairs !== 0 ||
-          q.criteria.some((id) => !decision.confirmCriteria.includes(id)))
-      )
-        reject("Confirm all pending criteria explicitly");
-      const available =
-        (repairBudgets.get(q.executionId) ?? 0) -
-        (snapshot.currentTask?.repairsUsed ?? 0);
-      if (
-        q.kind !== "acceptance" &&
-        decision.additionalRepairs < 1 &&
-        (q.kind === "repair" || available <= 0)
-      )
-        reject("Grant an explicit bounded continuation");
-      if (!decision.answer.trim()) reject("An answer is required");
-      resolvedQuestions.add(q.id);
-      repairBudgets.set(
-        q.executionId,
-        (repairBudgets.get(q.executionId) ?? 0) + decision.additionalRepairs,
-      );
-      snapshot.pendingEscalation = null;
-      dispatch = true;
-      return decision.escalationId;
-    });
-    if (dispatch) {
-      if (decision.executionId === input.sessionId) {
-        snapshot.conversation.push({
-          id: decision.commandId,
-          text: decision.answer,
-        });
-        queue.push(decision.commandId);
-        snapshot.state = "planning";
-      } else
-        await getExternalWorkflowHandle(decision.executionId).signal(
-          decisionSignal,
-          decision,
-        );
-    }
-    return value;
+  setHandler(cancelUpdate, () => {
+    if (e.status === "completed") reject("Run is completed");
+    cancelled = true;
+    scope.cancel();
+    return input.runId;
   });
-  setHandler(cancelUpdate, (id) =>
-    once(id, { cancel: true }, () => {
-      cancelled = true;
-      snapshot.state = "cancelled";
-      scope.cancel();
-      return input.sessionId;
-    }),
-  );
+  async function wait(kind: BlockKind, message: string): Promise<void> {
+    e.status = "blocked";
+    e.blocked = { id: `${input.runId}-q${++sequence}`, kind, message };
+    resumed = false;
+    // Even if persistence is temporarily unavailable, Temporal retains the blocker.
+    try {
+      e.sessions = await act.record(record);
+    } catch (error) {
+      if (isCancellation(error)) throw error;
+    }
+    await condition(() => resumed || cancelled);
+    e.blocked = null;
+    e.status = "running";
+  }
+  async function persist(): Promise<void> {
+    const status = e.status;
+    while (true) {
+      try {
+        e.sessions = await act.record(record);
+        return;
+      } catch (error) {
+        if (isCancellation(error)) throw error;
+        await wait("recovery", `Cannot persist run: ${errorText(error)}`);
+        e.status = status;
+      }
+    }
+  }
+  let feedback = "";
+  async function repair(reason: string): Promise<void> {
+    feedback = reason;
+    if (e.repairsUsed >= e.repairBudget) await wait("repair", reason);
+    e.repairsUsed++;
+    e.integration = null;
+    e.stage = "implement";
+  }
   try {
     await scope.run(async () => {
-      while (!cancelled && snapshot.state !== "completed") {
-        const ready = () => cancelled || queue.length > 0 || approval !== null;
-        if (snapshot.pendingEscalation) {
-          if (
-            !(await condition(
-              ready,
-              `${input.configuration.runtime.reminderSeconds}s`,
-            ))
-          ) {
-            snapshot.pendingEscalation.reminders++;
-            continue;
-          }
-        } else await condition(ready);
-        if (cancelled) break;
-        if (queue.length) {
-          queue.splice(0);
-          busy = true;
-          snapshot.state = "planning";
-          try {
-            const proposal = await activities(input).plan({
-              session: snapshot,
-              startingRevision:
-                snapshot.acceptedResults.at(-1)?.acceptedCommit ??
-                input.startingRevision,
-              configuration: input.configuration,
-            });
-            if (proposal.contract) {
-              proposal.contract = contractSchema.parse(proposal.contract);
-              const c = proposal.contract;
-              const base =
-                snapshot.acceptedResults.at(-1)?.acceptedCommit ??
-                input.startingRevision;
-              const predecessor = snapshot.acceptedResults.at(-1);
-              if (predecessor && !c.dependencies.includes(predecessor.taskId))
-                throw new Error(
-                  "Next task must reference its accepted predecessor",
-                );
-              if (c.version <= (versions.get(c.taskId) ?? 0))
-                throw new Error(
-                  "Revised contracts require an increasing version",
-                );
-              if (
-                c.startingRevision !== base ||
-                c.dependencies.some(
-                  (id) =>
-                    !snapshot.acceptedResults.some((r) => r.taskId === id),
-                ) ||
-                snapshot.acceptedResults.some((r) => r.taskId === c.taskId)
-              )
-                throw new Error("Proposal has invalid base or dependencies");
-              versions.set(c.taskId, c.version);
+      await persist();
+      while (e.stage !== "done") {
+        try {
+          if (e.stage === "prepare") {
+            e.workspace = await act.prepare(input);
+            e.stage = "setup";
+          } else if (e.stage === "setup") {
+            await act.setup({ ...input, workspace: e.workspace! });
+            e.stage = "implement";
+          } else {
+            const attempt = e.repairsUsed;
+            const work: AttemptInput = {
+              ...input,
+              workspace: e.workspace!,
+              attempt,
+              feedback,
+            };
+            let history = e.attempts.find((a) => a.attempt === attempt);
+            if (!history) {
+              history = {
+                attempt,
+                implementerWorkflowId: `${input.runId}-implementer-${attempt}`,
+                reviewerWorkflowId: null,
+                result: null,
+                review: null,
+                integration: null,
+              };
+              e.attempts.push(history);
             }
-            if (proposal.goalComplete && proposal.contract)
-              throw new Error(
-                "A completed goal cannot propose another contract",
-              );
-            snapshot.proposal = proposal;
-            snapshot.outline = proposal.outline;
-            snapshot.messages.push(proposal.message);
-            snapshot.state = proposal.goalComplete
-              ? "completed"
-              : proposal.contract
-                ? "awaiting_approval"
-                : "idle";
-          } catch (error) {
-            snapshot.state = "waiting";
-            snapshot.pendingEscalation = {
-              id: `${input.sessionId}-planning-${++questionSequence}`,
-              executionId: input.sessionId,
-              kind: "recovery",
-              question: String(error),
-              criteria: [],
-              reminders: 0,
-            };
-          } finally {
-            busy = false;
-          }
-        }
-        if (approval) {
-          const approved = approval;
-          approval = null;
-          busy = true;
-          const task = snapshot.currentTask!;
-          const result = await executeChild(taskExecution, {
-            workflowId: task.executionId,
-            cancellationType:
-              ChildWorkflowCancellationType.WAIT_CANCELLATION_COMPLETED,
-            args: [
-              {
-                sessionId: input.sessionId,
-                project: input.project,
-                coordinatorId: workflowInfo().workflowId,
-                executionId: task.executionId,
-                contract: task.contract,
-                configuration: approved.configuration,
-                dependencies: snapshot.acceptedResults.filter((r) =>
-                  task.contract.dependencies.includes(r.taskId),
-                ),
-              },
-            ],
-          });
-          busy = false;
-          snapshot.pendingEscalation = null;
-          if (result) {
-            snapshot.acceptedResults.push(result);
-            snapshot.currentTask = {
-              ...snapshot.currentTask!,
-              state: "completed",
-            };
-            queue.push(`accepted-${result.taskId}`);
-          } else {
-            cancelled = true;
-            snapshot.state = "cancelled";
-          }
-        }
-      }
-    });
-  } catch (error) {
-    if (!isCancellation(error)) throw error;
-    snapshot.state = "cancelled";
-  }
-  if (snapshot.state === "cancelled" && snapshot.currentTask)
-    snapshot.currentTask.state = "cancelled";
-  return snapshot;
-}
-
-export async function taskExecution(
-  input: TaskInput,
-): Promise<TaskResult | null> {
-  input.configuration = validatedConfiguration(input.configuration);
-  const act = activities(input);
-  const state: TaskSnapshot = {
-    executionId: input.executionId,
-    contract: input.contract,
-    attempt: 0,
-    repairsUsed: 0,
-    state: "running",
-  };
-  let questionSequence = 0;
-  let pending: Escalation | null = null;
-  let reply: Decision | null = null;
-  let budget = input.configuration.runtime.maxRepairs;
-  let feedback = "";
-  const scope = new CancellationScope();
-  const notify = () =>
-    getExternalWorkflowHandle(input.coordinatorId).signal(
-      progressSignal,
-      state,
-      pending,
-    );
-  setHandler(decisionSignal, (d) => {
-    if (
-      pending?.id === d.escalationId &&
-      d.executionId === input.executionId &&
-      !reply
-    )
-      reply = d;
-  });
-  setHandler(taskCancelSignal, () => scope.cancel());
-  async function ask(
-    kind: Escalation["kind"],
-    question: string,
-    criteria: string[] = [],
-  ): Promise<Decision> {
-    pending = {
-      id: `${input.executionId}-q${++questionSequence}`,
-      executionId: input.executionId,
-      kind,
-      question,
-      criteria,
-      reminders: 0,
-    };
-    state.state = "waiting";
-    reply = null;
-    await notify();
-    while (!reply) {
-      if (
-        !(await condition(
-          () => reply !== null,
-          `${input.configuration.runtime.reminderSeconds}s`,
-        ))
-      ) {
-        pending.reminders++;
-        await notify();
-      }
-    }
-    const answer = reply as Decision;
-    pending = null;
-    reply = null;
-    state.state = "running";
-    await notify();
-    return answer;
-  }
-  try {
-    return await scope.run(async () => {
-      let workspace;
-      while (!workspace) {
-        try {
-          workspace = await act.prepare(input);
-        } catch (error) {
-          feedback = (
-            await ask(
-              "recovery",
-              `Workspace needs reconciliation: ${String(error)}`,
-            )
-          ).answer;
-        }
-      }
-      while (true) {
-        await notify();
-        const attempt = {
-          ...input,
-          attempt: state.attempt,
-          feedback,
-          workspace,
-        };
-        try {
-          const implementation = await act.implement(attempt);
-          if (implementation.status === "blocked") {
-            const decision = await ask("blocker", implementation.summary);
-            budget += decision.additionalRepairs;
-            feedback = decision.answer;
-          } else {
-            const candidate = await act.candidate({
-              ...attempt,
-              implementation,
-            });
-            const checks = await act.check({ ...attempt, candidate });
-            if (
-              checks.length !== input.contract.checks.length ||
-              input.contract.checks.some(
-                (c) =>
-                  !checks.some(
-                    (e) =>
-                      e.id === c.id &&
-                      e.command === c.command &&
-                      e.revision === candidate.revision &&
-                      e.unchanged &&
-                      e.exitCode === 0,
-                  ),
-              )
-            ) {
-              feedback = `Checks failed for ${candidate.revision}: ${JSON.stringify(checks)}`;
-            } else {
-              const review = input.contract.review
-                ? await act.review({ ...attempt, candidate, checks })
-                : null;
+            if (e.stage === "implement") {
+              history.result ??= await executeChild(implementerWorkflow, {
+                workflowId: history.implementerWorkflowId,
+                args: [work],
+                cancellationType:
+                  ChildWorkflowCancellationType.WAIT_CANCELLATION_COMPLETED,
+              });
               if (
-                review &&
-                (review.taskId !== input.contract.taskId ||
-                  review.attempt !== state.attempt ||
-                  review.revision !== candidate.revision)
+                history.result.implementation.submission.status === "blocked"
+              ) {
+                await wait(
+                  "agent",
+                  history.result.implementation.submission.summary,
+                );
+                await repair(history.result.implementation.submission.summary);
+              } else if (
+                !history.result.candidate ||
+                !checksPassed(
+                  input.contract,
+                  history.result.checks,
+                  history.result.candidate.revision,
+                )
               )
-                throw new Error("Stale review");
-              if (review?.verdict === "blocked") {
-                const decision = await ask("blocker", review.summary);
-                budget += decision.additionalRepairs;
-                feedback = decision.answer;
-              } else if (review && review.verdict !== "accepted")
-                feedback = review.summary;
+                await repair(
+                  `Checks failed: ${JSON.stringify(history.result.checks)}`,
+                );
+              else e.stage = "review";
+            } else if (e.stage === "review") {
+              const candidate = history.result!.candidate!;
+              history.reviewerWorkflowId = `${input.runId}-reviewer-${attempt}`;
+              const reviewInput = {
+                ...work,
+                candidate,
+                checks: history.result!.checks,
+              };
+              history.review ??= await executeChild(reviewerWorkflow, {
+                workflowId: history.reviewerWorkflowId,
+                args: [reviewInput],
+                cancellationType:
+                  ChildWorkflowCancellationType.WAIT_CANCELLATION_COMPLETED,
+              });
+              assertReview(reviewInput, history.review.submission);
+              if (history.review.submission.verdict === "accepted")
+                e.stage = "integrate";
               else {
-                for (const criterion of input.contract.acceptance) {
-                  const evidence = implementation.evidence.find(
-                    (e) => e.criterionId === criterion.id,
-                  );
-                  if (
-                    criterion.mode !== "human" &&
-                    (!evidence ||
-                      !evidence.references.length ||
-                      evidence.references.some(
-                        (ref) =>
-                          ref !== "diff" && !checks.some((c) => c.id === ref),
-                      ))
-                  )
-                    throw new Error(
-                      `Missing or unknown acceptance evidence: ${criterion.id}`,
-                    );
-                }
-                const human = input.contract.acceptance
-                  .filter((a) => a.mode === "human")
-                  .map((a) => a.id);
-                if (human.length)
-                  await ask(
-                    "acceptance",
-                    "Confirm the acceptance criteria against the candidate evidence",
-                    human,
-                  );
-                const result: TaskResult = {
-                  taskId: input.contract.taskId,
-                  executionId: input.executionId,
-                  acceptedCommit: candidate.revision,
-                  workspace,
-                  checks,
-                  review,
-                  evidence: implementation.evidence,
-                  humanConfirmations: human,
-                  blockers: [],
-                };
-                await act.accept({ ...attempt, result });
-                state.state = "completed";
-                await notify();
-                return result;
+                if (history.review.submission.verdict === "blocked")
+                  await wait("agent", history.review.submission.summary);
+                await repair(JSON.stringify(history.review.submission));
               }
+            } else if (e.stage === "integrate") {
+              history.integration = await act.integrate({
+                ...work,
+                candidate: history.result!.candidate!,
+                checks: history.result!.checks,
+                review: history.review!,
+              });
+              e.integration = history.integration;
+              if (
+                !checksPassed(
+                  input.contract,
+                  e.integration.checks,
+                  e.integration.revision,
+                )
+              )
+                await repair(
+                  `Integration checks failed: ${JSON.stringify(e.integration.checks)}`,
+                );
+              else e.stage = "push";
+            } else if (e.stage === "push") {
+              await act.push({
+                ...input,
+                workspace: e.workspace!,
+                integration: e.integration!,
+              });
+              e.pushed = true;
+              e.stage = "cleanup";
+            } else if (e.stage === "cleanup") {
+              await act.cleanup({
+                ...input,
+                workspace: e.workspace!,
+                integration: e.integration!,
+              });
+              e.cleaned = true;
+              e.stage = "done";
             }
           }
+          await persist();
         } catch (error) {
           if (isCancellation(error)) throw error;
-          const decision = await ask(
-            "recovery",
-            `An activity did not complete safely: ${String(error)}`,
-          );
-          budget += decision.additionalRepairs;
-          feedback = decision.answer;
+          const text = errorText(error);
+          const kind: BlockKind = text.includes("Development base changed")
+            ? "base_changed"
+            : ["push", "cleanup"].includes(e.stage)
+              ? "delivery"
+              : "recovery";
+          await wait(kind, text);
         }
-        if (state.repairsUsed >= budget) {
-          const decision = await ask(
-            "repair",
-            `Repair budget exhausted. ${feedback}`,
-          );
-          budget += decision.additionalRepairs;
-          feedback += `\nHuman decision: ${decision.answer}`;
-        }
-        state.repairsUsed++;
-        state.attempt++;
       }
+      e.status = "completed";
+      await persist();
     });
   } catch (error) {
     if (!isCancellation(error)) throw error;
-    return null;
+    e.status = "cancelled";
+    e.blocked = null;
+    await CancellationScope.nonCancellable(async () => {
+      try {
+        e.sessions = await act.record(record);
+      } catch {
+        /* Temporal retains the cancelled result if artifact storage is unavailable. */
+      }
+    });
   }
+  return record;
 }

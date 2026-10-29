@@ -16,7 +16,7 @@ sources:
 
 The accepted direction is a human-approved phase contract, rolling behavior planning, and a deterministic delivery runtime. Temporal owns durable execution, and Pi runs the planner, implementer, and reviewer inside activities. TypeScript on Node.js 24 remains the application stack. This serves [[project_goal]].
 
-The repository already implements a task-based Temporal/Pi loop with approval, worktrees, candidate commits, checks, optional review, bounded repairs, human questions, cancellation, and recovery. It is no longer an empty scaffold. That loop is the baseline for the phase model, not an implementation of phase approval or final phase acceptance. Code and configuration are authoritative; [[architecture_tooling]] lists the current interfaces and [[project_phase-one]] describes the remaining delivery slice.
+The repository now implements direct single-task delivery with a parent task workflow, separate Implementer/Reviewer Child Workflows per attempt, fresh role sessions, a bounded Critic Loop, isolated checked integration, push to `origin/dev`, cleanup, and scoped recovery. The old planner-chat/coordinator approval flow has been removed. This task runner is the execution foundation for the phase model; phase approval, rolling Planner dispatch, SQLite and final human phase acceptance are not implemented. Code and configuration remain authoritative; [[architecture_tooling]] documents the current interfaces.
 
 ## Domain language and ownership
 
@@ -31,7 +31,7 @@ The repository already implements a task-based Temporal/Pi loop with approval, w
 | Attempt            | A bounded execution or repair attempt for a task or delivery step.                                                                                                                                             |
 | Escalation         | A recorded request for missing input, authority, reconciliation, or a contract decision that the runtime cannot resolve on its own.                                                                            |
 
-The planner is the developer's reasoning partner for goals and phases. It creates executable tasks and later evaluates the changed system to plan the next increment. It does not write the implementation or own the scheduler. The currently named `orchestrator` Pi role performs planning; a separate AI orchestrator is not required by the target architecture.
+The planner is the developer's reasoning partner for goals and phases. It creates executable tasks and later evaluates the changed system to plan the next increment. It does not write the implementation or own the scheduler. The former `orchestrator` Pi role performed planning in the retired chat path; a separate AI orchestrator is not required by the target architecture.
 
 | Component         | Responsibility                                                                                                                                       |
 | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -56,9 +56,9 @@ The phase states are conceptually in progress, ready for acceptance, in correcti
 
 ## Fixed lifecycle, adaptable task plan
 
-One authoritative phase run owns the approved contract, current task plan, and overall progress. Individual task executions may use subordinate workflows, but do not become separately human-approved delivery contracts.
+One authoritative phase run owns the approved contract, current task plan, and overall progress. Each task runner starts separate Implementer and Reviewer Child Workflows per attempt. The task parent owns the repair loop and worktree; role children coordinate their own Activities and do not become separately human-approved delivery contracts.
 
-For the initial phase implementation, use a defined implementation lifecycle: prepare workspace, implement, create candidate, run checks, review, and perform bounded repairs. Review is a mandatory quality gate for code changes in the target, although the current task loop still makes it optional.
+For the initial phase implementation, use a defined implementation lifecycle: prepare workspace, implement, create candidate, run checks, review, and perform bounded repairs. Review is mandatory for code changes in both the task runner and the target phase lifecycle. All review findings must be resolved.
 
 Task count, decomposition, dependencies, and technical solutions remain adaptable. The planner can split tasks or add necessary technical work within the contract, but cannot waive checks, enlarge authority, weaken criteria, or invent arbitrary executable steps. Newly needed capabilities must be implemented and registered before use. A general graph editor and arbitrary per-run pipelines are not the initial product.
 
@@ -70,7 +70,7 @@ Broader capabilities such as standalone review, infrastructure work, security ch
 
 Normal development starts from the current verified `dev`. Writable tasks use isolated purpose branches/worktrees, and accepted work is integrated back into `dev`, followed by integration verification and push. The next increment is planned against that resulting state. Changes must be reconciled and rechecked if the integration base has changed; integration must not discard unrelated work or reuse evidence for another revision.
 
-`main` is reserved for an explicitly agreed milestone promotion and publication process, for example after an accepted phase. A push to `dev`, promotion to `main`, and an external release/deployment are different operations. The contract must define which endpoint and permissions apply. Merely reaching a phase boundary does not grant publishing authority. The exact publishing workflow remains to be implemented; phase closure still requires the agreed endpoint and human acceptance.
+`main` is reserved for an explicitly agreed milestone promotion and publication process, for example after an accepted phase. A push to `dev`, promotion to `main`, and an external release/deployment are different operations. The contract must define which endpoint and permissions apply. Merely reaching a phase boundary does not grant publishing authority. The task runner already integrates/pushes to dev; milestone publishing remains to be implemented; phase closure still requires the agreed endpoint and human acceptance.
 
 This is product behavior for future Claith deliveries. It does not itself authorize the coding assistant to push, merge, or publish the repository during unrelated maintenance; the repository's working instructions continue to apply.
 

@@ -17,57 +17,26 @@ import type {
 import { executionProfileSchema } from "../domain/configuration.js";
 import { rolePolicy, toolRegistry } from "../domain/tools.js";
 import type { Role } from "../configuration.js";
-import { contractSchema, identity, revision } from "../domain/contracts.js";
+import {
+  assertSubmission,
+  assertReview,
+  implementationSchema,
+  reviewSchema,
+} from "../domain/contracts.js";
 import type {
   Activities,
   AttemptInput,
+  ReviewInput,
   Implementation,
-  PlanInput,
-  Proposal,
   Review,
+  AgentResult,
 } from "../domain/contracts.js";
-import { assertRevision, git, readDiff, runSetup } from "../workspace/git.js";
+import type { ExecutionAgentProfile } from "../domain/configuration.js";
+import { git, assertRevision } from "../workspace/git.js";
 import { withOwnership } from "../workspace/ownership.js";
-import {
-  logEvent,
-  projectId,
-  readJson,
-  taskDirectory,
-  writeJson,
-} from "../workspace/storage.js";
+import { logEvent, readJson, writeJson } from "../workspace/storage.js";
 import { runCommand } from "../workspace/process.js";
 
-const evidence = z.array(
-  z.strictObject({ criterionId: identity, references: z.array(z.string()) }),
-);
-const implementationSchema = z.strictObject({
-  taskId: identity,
-  attempt: z.number().int().nonnegative(),
-  revision,
-  status: z.enum(["submitted", "blocked"]),
-  summary: z.string().min(1),
-  evidence,
-});
-const reviewSchema = z.strictObject({
-  taskId: identity,
-  attempt: z.number().int().nonnegative(),
-  revision,
-  verdict: z.enum(["accepted", "changes_requested", "blocked"]),
-  summary: z.string().min(1),
-  evidenceRefs: z.array(z.string()),
-});
-const proposalSchema = z.strictObject({
-  message: z.string().min(1),
-  outline: z.array(
-    z.strictObject({
-      taskId: identity,
-      title: z.string(),
-      dependencies: z.array(identity),
-    }),
-  ),
-  contract: contractSchema.nullable(),
-  goalComplete: z.boolean(),
-});
 export interface RoleSession {
   prompt(text: string): Promise<unknown>;
   subscribe(listener: (event: unknown) => void): () => void;
@@ -117,8 +86,9 @@ export interface RoleRequest<T> {
   cwd: string;
   directory: string;
   logPath: string;
-  profile: PlanInput["configuration"]["agents"][Role];
+  profile: ExecutionAgentProfile;
   prompt: string;
+  context?: string;
   schema: z.ZodType<T>;
   validate: (value: T) => void | Promise<void>;
   customTools?: ToolDefinition[];
@@ -216,7 +186,7 @@ export async function runRole<T>(
       retry: { enabled: false },
     }),
     resourceLoader: resources(
-      `${profile.instructions}\n\n${await repositoryContext(request.cwd)}\n\n${
+      `${profile.instructions}\n\n${request.context ?? ""}\n\n${await repositoryContext(request.cwd)}\n\n${
         request.role === "orchestrator"
           ? "Concretize only the next task. Preserve explicit dependencies. Propose local-commit contracts; never approve or execute them. Use increasing versions for revised contracts. Explain completion or ask for clarification when needed."
           : request.role === "implementer"
@@ -225,7 +195,10 @@ export async function runRole<T>(
       }`,
     ),
   });
-  await writeJson(sessionFile, { path: manager.getSessionFile() });
+  await writeJson(sessionFile, {
+    path: manager.getSessionFile(),
+    id: manager.getSessionId(),
+  });
   let logging = Promise.resolve();
   let logFailure: unknown = null;
   const unsubscribe = session.subscribe((event) => {
@@ -276,71 +249,74 @@ export function piActivities(
   root: string,
   signal?: AbortSignal,
   factory?: SessionFactory,
-): Pick<Activities, "plan" | "implement" | "review"> {
-  const cancellation = signal ? { signal } : {};
-  const logs = (session: string, operation: string) =>
-    join(root, "log", `${session}-${operation}.jsonl`);
+): Pick<Activities, "implement" | "review"> {
+  async function invoke<T extends Implementation | Review>(
+    input: AttemptInput,
+    role: "implementer" | "reviewer",
+    schema: z.ZodType<T>,
+    prompt: string,
+    customTools: ToolDefinition[],
+    boundRevision: string,
+    validate: (value: T) => Promise<void> | void,
+  ): Promise<AgentResult<T>> {
+    const directory = join(
+      input.workspace.artifactDir,
+      `${role}-${input.attempt}`,
+    );
+    const file = join(directory, "result.json");
+    const prior = await readJson<AgentResult<T>>(file);
+    if (prior) {
+      await validate(prior.submission);
+      return prior;
+    }
+    const submission = await runRole(
+      {
+        role,
+        cwd: input.workspace.path,
+        directory,
+        profile: input.configuration.agents[role],
+        logPath: join(
+          root,
+          "log",
+          `${input.runId}-${role}-${input.attempt}.jsonl`,
+        ),
+        prompt,
+        schema,
+        customTools,
+        validate,
+        ...(signal ? { signal } : {}),
+        correlation: {
+          runId: input.runId,
+          taskId: input.contract.taskId,
+          attempt: input.attempt,
+        },
+        context: JSON.stringify({
+          contract: input.contract,
+          runId: input.runId,
+          attempt: input.attempt,
+          revision: boundRevision,
+          feedback: input.feedback,
+        }),
+      },
+      factory,
+    );
+    const manifest = await readJson<{ id: string }>(
+      join(directory, "session.json"),
+    );
+    if (!manifest?.id) throw new Error("Missing Pi session identity");
+    const result = { sessionId: manifest.id, submission };
+    await writeJson(file, result);
+    return result;
+  }
   return {
-    plan: async (input: PlanInput): Promise<Proposal> => {
-      const directory = taskDirectory(
-        root,
-        input.session.project,
-        input.session.sessionId,
-        "orchestrator",
-      );
-      await mkdir(directory, { recursive: true });
-      return withOwnership(directory, async () => {
-        const key = `${input.session.conversation.length}-${input.session.acceptedResults.length}-${input.session.messages.length}`;
-        const file = join(directory, `proposal-${key}.json`);
-        const prior = await readJson<Proposal>(file);
-        if (prior) return prior;
-        await writeJson(join(directory, `input-${key}.json`), input);
-        const result = await runRole(
-          {
-            role: "orchestrator",
-            cwd: input.session.project,
-            directory,
-            logPath: logs(input.session.sessionId, "orchestrator"),
-            profile: input.configuration.agents.orchestrator,
-            correlation: {
-              projectId: projectId(input.session.project),
-              sessionId: input.session.sessionId,
-              executionId: "orchestrator",
-              taskId: null,
-              attempt: 0,
-              revision: input.startingRevision,
-            },
-            schema: proposalSchema,
-            validate: () => {},
-            ...cancellation,
-            prompt: `Prepare the next contract, clarify the goal, or report completion. Use startingRevision ${input.startingRevision}.\n${JSON.stringify(input.session)}`,
-          },
-          factory,
-        );
-        await writeJson(file, result);
-        return result;
-      });
-    },
-    implement: async (input: AttemptInput): Promise<Implementation> =>
+    implement: async (input) =>
       withOwnership(input.workspace.artifactDir, async () => {
-        const file = join(
-          input.workspace.artifactDir,
-          `implementation-${input.attempt}.json`,
-        );
-        const prior = await readJson<Implementation>(file);
-        if (prior) return prior;
-        await runSetup(input, signal);
-        const currentRevision = await git(
-          input.workspace.path,
-          "rev-parse",
-          "HEAD",
-        );
-        const directory = join(input.workspace.artifactDir, "implementer");
+        const commit = await git(input.workspace.path, "rev-parse", "HEAD");
         const bash: ToolDefinition = {
           name: "bash",
           label: "Bash",
           description:
-            "Execute a command in this task's worktree; output is persisted",
+            "Execute a command in the task worktree; output is persisted",
           parameters: Type.Object({
             command: Type.String(),
             timeout: Type.Optional(Type.Number()),
@@ -351,34 +327,28 @@ export function piActivities(
               input.workspace.artifactDir,
               `bash-${input.attempt}-${id.replace(/[^A-Za-z0-9_-]/g, "_")}.log`,
             );
-            const timeoutMs =
-              Math.max(
-                1,
-                Math.min(
-                  args.timeout ??
-                    input.configuration.runtime.checkTimeoutSeconds,
-                  input.configuration.runtime.checkTimeoutSeconds,
-                ),
-              ) * 1000;
+            const signals = [signal, toolSignal].filter(
+              (s): s is AbortSignal => !!s,
+            );
             const exitCode = await runCommand(args.command, {
               cwd: input.workspace.path,
               output,
-              timeoutMs,
-              ...(toolSignal || signal
-                ? {
-                    signal:
-                      toolSignal && signal
-                        ? AbortSignal.any([toolSignal, signal])
-                        : (toolSignal ?? signal)!,
-                  }
-                : {}),
+              timeoutMs:
+                Math.max(
+                  1,
+                  Math.min(
+                    args.timeout ??
+                      input.configuration.runtime.checkTimeoutSeconds,
+                    input.configuration.runtime.checkTimeoutSeconds,
+                  ),
+                ) * 1000,
+              ...(signals.length ? { signal: AbortSignal.any(signals) } : {}),
             });
-            const text = (await readFile(output, "utf8")).slice(-48_000);
             return {
               content: [
                 {
                   type: "text",
-                  text: `${text}\nExit: ${exitCode}. Full output: ${output}`,
+                  text: `${(await readFile(output, "utf8")).slice(-48000)}\nExit: ${exitCode}; full output: ${output}`,
                 },
               ],
               details: { exitCode, output },
@@ -386,125 +356,71 @@ export function piActivities(
             };
           },
         };
-        const result = await runRole(
-          {
-            role: "implementer",
-            cwd: input.workspace.path,
-            directory,
-            logPath: logs(input.sessionId, `${input.executionId}-implementer`),
-            profile: input.configuration.agents.implementer,
-            correlation: {
-              projectId: projectId(input.project),
-              sessionId: input.sessionId,
-              executionId: input.executionId,
-              taskId: input.contract.taskId,
-              attempt: input.attempt,
-              revision: currentRevision,
-            },
-            schema: implementationSchema,
-            customTools: [bash],
-            ...cancellation,
-            prompt: `Approved contract and explicit dependency results: ${JSON.stringify(input.contract)}\n${JSON.stringify(input.dependencies)}\nTask ${input.contract.taskId}, attempt ${input.attempt}, revision ${currentRevision}.\nRepair feedback: ${input.feedback}`,
-            validate: (value) => {
-              if (
-                value.taskId !== input.contract.taskId ||
-                value.attempt !== input.attempt ||
-                value.revision !== currentRevision
-              )
-                throw new Error("Stale implementation submission");
-              if (
-                value.evidence.some(
-                  (e) =>
-                    !input.contract.acceptance.some(
-                      (a) => a.id === e.criterionId,
-                    ) ||
-                    e.references.some(
-                      (r) =>
-                        r !== "diff" &&
-                        !input.contract.checks.some((c) => c.id === r),
-                    ),
-                )
-              )
-                throw new Error("Unknown acceptance evidence");
-            },
-          },
-          factory,
+        // Preserve the original input revision across recovery after agent effects.
+        const bindingFile = join(
+          input.workspace.artifactDir,
+          `implementer-${input.attempt}-input.json`,
         );
-        const implementation: Implementation = {
-          status: result.status,
-          summary: result.summary,
-          evidence: result.evidence,
+        const binding = (await readJson<{ revision: string }>(bindingFile)) ?? {
+          revision: commit,
         };
-        await writeJson(file, implementation);
-        return implementation;
+        await writeJson(bindingFile, binding);
+        return invoke(
+          input,
+          "implementer",
+          implementationSchema,
+          input.contract.tasks,
+          [bash],
+          binding.revision,
+          (value) => {
+            assertSubmission(input, value, binding.revision);
+            if (
+              value.evidence.some(
+                (e) =>
+                  !input.contract.acceptanceCriteria.some(
+                    (a) => a.id === e.criterionId,
+                  ) ||
+                  e.references.some(
+                    (r) =>
+                      r !== "diff" &&
+                      !input.contract.checks.some((c) => c.id === r),
+                  ),
+              )
+            )
+              throw new Error("Unknown implementation evidence");
+          },
+        );
       }),
-    review: async (input): Promise<Review> =>
+    review: async (input: ReviewInput) =>
       withOwnership(input.workspace.artifactDir, async () => {
         await assertRevision(input.workspace, input.candidate.revision);
-        const file = join(
-          input.workspace.artifactDir,
-          `review-${input.attempt}.json`,
-        );
-        const prior = await readJson<Review>(file);
-        if (prior) return prior;
-        const readDiffTool: ToolDefinition = {
+        const diff: ToolDefinition = {
           name: "read_diff",
           label: "Read candidate diff",
-          description: "Read the exact approved candidate diff",
+          description: "Read the exact candidate diff",
           parameters: Type.Object({}),
           execute: async () => ({
             content: [
-              { type: "text", text: await readDiff(input.candidate.diffRef) },
+              {
+                type: "text",
+                text: await readFile(input.candidate.diffRef, "utf8"),
+              },
             ],
             details: { revision: input.candidate.revision },
           }),
         };
-        const result = await runRole(
-          {
-            role: "reviewer",
-            cwd: input.workspace.path,
-            directory: join(
-              input.workspace.artifactDir,
-              `reviewer-${input.candidate.revision}`,
-            ),
-            logPath: logs(
-              input.sessionId,
-              `${input.executionId}-reviewer-${input.attempt}`,
-            ),
-            profile: input.configuration.agents.reviewer,
-            correlation: {
-              projectId: projectId(input.project),
-              sessionId: input.sessionId,
-              executionId: input.executionId,
-              taskId: input.contract.taskId,
-              attempt: input.attempt,
-              revision: input.candidate.revision,
-            },
-            schema: reviewSchema,
-            customTools: [readDiffTool],
-            ...cancellation,
-            prompt: `Review task ${input.contract.taskId}, attempt ${input.attempt}, revision ${input.candidate.revision}.\n${JSON.stringify(input.contract)}\nRecorded checks: ${JSON.stringify(input.checks)}\nImplementation: ${JSON.stringify(input.candidate.implementation)}`,
-            validate: (value) => {
-              if (
-                value.taskId !== input.contract.taskId ||
-                value.attempt !== input.attempt ||
-                value.revision !== input.candidate.revision
-              )
-                throw new Error("Stale review submission");
-              if (
-                value.evidenceRefs.some(
-                  (ref) =>
-                    ref !== "diff" && !input.checks.some((c) => c.id === ref),
-                )
-              )
-                throw new Error("Unknown review evidence");
-            },
+        return invoke(
+          input,
+          "reviewer",
+          reviewSchema,
+          `${input.contract.tasks}\n\nCandidate: ${input.candidate.revision}\nChecks: ${JSON.stringify(input.checks)}`,
+          [diff],
+          input.candidate.revision,
+          async (value) => {
+            assertReview(input, value);
+            await assertRevision(input.workspace, input.candidate.revision);
           },
-          factory,
         );
-        await assertRevision(input.workspace, input.candidate.revision);
-        await writeJson(file, result);
-        return result;
       }),
   };
 }

@@ -10,93 +10,56 @@ sources:
 
 # Runtime and Agent Tooling
 
-## Implemented baseline and selected extensions
+## Current implementation
 
-The repository contains a working task-based delivery runtime. The phase-based product direction in [[architecture_delivery-runtime]] builds on it. `package.json`, `package-lock.json`, code, and configuration are authoritative for installed versions and current behavior.
+The repository implements a directly invoked, single-task delivery runner on Node.js 24, TypeScript, npm, Temporal, and Pi. Code, manifests, and configuration are authoritative. Phase planning, SQLite task storage, and final human phase acceptance remain target behavior in [[architecture_delivery-runtime]].
 
-| Tool or subsystem               | Current responsibility and status                                                                                                                                                                                                    |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| TypeScript / Node.js / npm      | Node.js 24, strict ESM TypeScript, locked npm dependencies, ESLint, Prettier, Vitest, and tsx are configured and used by the implementation.                                                                                         |
-| Temporal TypeScript SDK         | Workflow, worker, client, and activity SDKs are installed. Coordinator/task workflows, heartbeats, cancellation, scoped decisions, and native worker startup are implemented.                                                        |
-| Temporal development service    | Compose runs the CLI development server with API `127.0.0.1:7233`, UI `127.0.0.1:8233`, and SQLite state in the `temporal-data` volume. This is development infrastructure.                                                          |
-| Production Temporal persistence | PostgreSQL remains the selected production backing from the runtime direction; it is not configured by the development Compose file. Claith uses Temporal APIs, not its internal database tables.                                    |
-| Pi SDK                          | `@earendil-works/pi-coding-agent` is installed. Role sessions, provider authentication, model/reasoning selection, structured completion, transcripts, and tool/session audit events are implemented.                                |
-| Git and worktrees               | Isolated task branches, workspace ownership, candidate commits, diff capture, revision checks, and interrupted-effect reconciliation are implemented. Integration to `dev`, push, and milestone publication are target capabilities. |
-| Application persistence         | Current artifacts are JSON/JSONL files; there is no application database. SQLite is the proposed local phase/task store, distinct from Temporal persistence. Driver/schema/migrations are still open.                                |
-| Control surface                 | Terminal `init`, `runtime`, and project-bound `chat`, with approval, status, answers, continuation, cancellation, and reconnect. A separate control UI remains future work.                                                          |
-| GitHub CLI (`gh`)               | Repository issue workflow for `myboyflacko/claith`; no automatic issue ingestion, PR creation, or publication capability is currently wired into delivery.                                                                           |
-| Repository wiki                 | Durable project direction and decisions. Runtime context currently includes `AGENTS.md`, `INDEX.md`, `wiki/index.md`, and `wiki/project/project_goal.md` when present.                                                               |
+`taskWorkflow` owns the task worktree, repair budget, blocked decisions, history, delivery and cancellation. Each attempt starts separate `implementerWorkflow` and `reviewerWorkflow` Child Workflow executions. The implementer child runs a fresh Pi session, candidate creation and checks. The reviewer child evaluates the exact candidate in a fresh session. The parent alone owns the Critic Loop. Technical recovery resumes the same logical attempt/session after reconciling effects; each new repair uses a new session.
 
-The application runs natively. Compose hosts the Temporal development service, not the Claith application or a UI. A production deployment recipe remains open. No additional message broker, alternative agent harness, or general workflow builder is required by the current plan.
+A successful task is merged with a merge commit in an isolated integration worktree, checked again, integrated into clean local `dev`, pushed normally to `origin/dev`, and cleaned up. A changed development base blocks and requires a new contract version/run. Default `maxRepairs = 2` allows an initial attempt plus two repairs. Exhaustion requires explicit additional budget. Push/cleanup failures resume only missing delivery operations after reconciliation. No operation publishes to `main` or creates a PR.
 
-## Configuration and permission registry
+The previous chat/coordinator/task-approval path is removed. Existing coordinator sessions are not migrated; stop or resolve their workers/runs before upgrading. `docs/acceptance.md` remains historical evidence for that earlier implementation, not instructions for the new interface.
 
-The only runtime settings file is `~/.claith/config.toml`. The former `claith.toml` and unused legacy `[agents]`/`[workflow]` format are not configuration sources. Agent profiles remain at `~/.claith/agents/{orchestrator,implementer,reviewer}.toml`. Ordinary startup creates directories only; explicit `init` writes missing templates without overwriting existing files.
+## Direct control and storage
 
-Profiles require `provider`, `model`, `instructions`, and `permissions`; `reasoning` defaults to `medium`. `permissions` has no fallback: it must be `read-only` or `read-write`. Orchestrator and reviewer are capped at `read-only`; implementer defaults to `read-write` and can be restricted to `read-only`.
+The CLI supports `init`, `runtime`, `run --project <path> --contract <file.json>`, and `status`, `resume`, `cancel` with `--run <id>`. Submission explicitly authorizes task delivery and returns a stable project/task/version run ID. Identical submissions are idempotent; conflicting input under that identity is rejected. Status is a JSON record with separate immutable `contract` and evolving `execution` sections. Resume is scoped to the current blocker; budget increases must be explicit.
 
-`src/domain/tools.ts` centrally registers tool names, required permission levels, allowed roles, and Pi/custom sources. Profiles contain no individual tool list. Loading a profile resolves its rights into an execution profile with explicit tool names; approval snapshots that selection. Later profile edits or registry additions do not expand saved execution rights. Missing tool lists, duplicate or disallowed names, and missing mandatory completion tools are rejected.
+Artifacts under `~/.claith/sessions/<run-id>/` include the initial input, execution projection, attempt outputs, role/session identities, diffs, checks, integration evidence and push/cleanup checkpoints. Large logs/transcripts remain files. All earlier attempts are retained. Completed task worktrees and fully integrated local task branches are removed; uncertain/dirty state and failed runs remain inspectable. Temporal remains authoritative for execution. There is no application SQLite database yet.
 
-| Role                                      | Default effective tools                                                                   |
-| ----------------------------------------- | ----------------------------------------------------------------------------------------- |
-| Orchestrator, currently the planning role | Pi `read`, `grep`, `find`, `ls`; custom `submit_proposal`.                                |
-| Implementer                               | Pi `read`, `grep`, `find`, `ls`, `edit`, `write`; custom `bash`, `submit_implementation`. |
-| Reviewer                                  | Pi `read`, `grep`, `find`, `ls`; custom `read_diff`, `submit_review`.                     |
+The Compose Temporal development service uses its own SQLite volume and exposes API `127.0.0.1:7233` and UI `127.0.0.1:8233`. It is independent of application artifacts or proposed application SQLite storage. PostgreSQL remains the selected production Temporal backing; the production deployment recipe and separate UI remain future work. The application runs natively, and Linux process ownership/subprocess reconciliation uses `/proc`.
 
-Restricting the implementer to `read-only` removes `edit`, `write`, and `bash`, retaining its completion tool. New custom tools need registry metadata and a supplied implementation; matching future execution profiles receive them without individual profile edits. Unknown custom tools, duplicate definitions, and unintended Pi-tool overrides are rejected. Registration of tools is implemented; a general registry of arbitrary workflow capabilities is not.
+## Task contract
 
-These rights govern exposed tools, not filesystem paths, network access, or operating-system isolation. In particular, `bash` uses the worker process's host permissions. Provider credentials remain in Pi's normal discovery flow. Runtime sessions currently disable loading arbitrary skills, extensions, MCP servers, and agent packages; the presence of a `skills/` directory does not mean skills are loaded.
+`src/domain/contracts.ts` defines the new task contract, replacing the old task-approval schema:
 
-## Current custom tools
+| Fields                                      | Meaning                                                                                                                                                            |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `taskId`, `version`, `startCommit`, `title` | Task identity, positive version, expected common local/remote `dev` base, and title.                                                                               |
+| `tasks`                                     | One Markdown assignment, used unchanged as the initial implementer prompt and supplied to the reviewer.                                                            |
+| `goal`, `context`, `scope`, `constraints`   | Additional authoritative task context; scope and constraints are descriptive, not path sandbox rules.                                                              |
+| `acceptanceCriteria`                        | Nonempty criteria with unique IDs, text, `check`/`review` mode and nullable `checkId`. Check criteria must reference an existing check. This is also the task DoD. |
+| `checks`                                    | Nonempty named executable commands.                                                                                                                                |
+| `setup`                                     | Optional named preparation commands, default empty; executed once per task worktree with interrupted-effect reconciliation.                                        |
 
-| Tool                    | Role and purpose                                                                                                                                                              |
-| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `submit_proposal`       | Orchestrator submits a message, outline, nullable next task contract, and `goalComplete` flag. This is still the task-based proposal protocol.                                |
-| `submit_implementation` | Implementer submits task/attempt/revision identity, submitted/blocked status, summary, and criterion evidence.                                                                |
-| `submit_review`         | Reviewer submits task/attempt/revision identity, accepted/changes-requested/blocked verdict, summary, and evidence references.                                                |
-| `bash`                  | Claith's own command executor in the implementer's worktree, with persisted output, bounded timeout, and cancellation. This replaces the Pi bash implementation for the role. |
-| `read_diff`             | Reviewer reads the stored diff for the exact supplied candidate, without a general shell.                                                                                     |
+Both roles receive the contract, run/attempt identity, relevant revision and repair feedback. Submissions are bound to run, task version, attempt and revision. Reviewer output includes a verdict, findings and criterion assessments with evidence references. Acceptance requires all criteria satisfied, passing checks for that candidate, and no findings. These gates validate evidence identity and completeness; they are not an automatic semantic proof that all desired behavior is correct. Whole-phase human acceptance is still separate future work.
 
-Definitions and binding are in `src/agents/pi.ts`. `runRole` adds the role's mandatory completion tool, filters supplied custom tools by the saved execution selection, and uses that same explicit allowlist for new and resumed Pi sessions. It validates structured submissions, allows one correction prompt, waits for the turn to finish, and flushes audit logs before returning.
+## Configuration, permissions and custom tools
 
-## Current activities and contract schema
+`~/.claith/config.toml` is the sole runtime settings file. `init` creates missing implementer/reviewer profiles under `agents/`, without overwriting existing files. The runner no longer loads or requires an orchestrator profile; any old file is left untouched. Profiles require provider, model, instructions and explicit permissions; reasoning defaults to medium.
 
-The worker registers seven activities in `src/runtime/activities.ts`:
+The central `src/domain/tools.ts` registry controls required permissions, roles and Pi/custom sources. Implementer defaults to read-write and may be restricted; reviewer is read-only. Execution snapshots contain explicit tool names, so later profile or registry expansion does not widen a running task's rights. Unknown/disallowed tools, duplicate definitions and missing mandatory completion tools are rejected. Permissions do not provide OS, path or network isolation; bash uses the worker's host authority. Pi credentials remain in normal provider discovery; arbitrary skills, extensions and MCP servers are not loaded.
 
-| Activity    | Current behavior                                                                                                                                   |
-| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `plan`      | Orchestrator proposes the next task contract, asks for clarification, or reports goal completion.                                                  |
-| `prepare`   | Allocate/reconcile the isolated task worktree and approval snapshot.                                                                               |
-| `implement` | Execute approved setup and run the implementer, including bounded repair feedback.                                                                 |
-| `candidate` | Create/reconcile the candidate commit and store its diff.                                                                                          |
-| `check`     | Execute approved check commands and persist revision-bound evidence.                                                                               |
-| `review`    | Run the reviewer against the supplied candidate and recorded evidence.                                                                             |
-| `accept`    | Revalidate the candidate and recorded checks, then persist `accepted.json`. This is task acceptance, not the planned final human phase acceptance. |
+| Active custom tool      | Purpose                                                                                 |
+| ----------------------- | --------------------------------------------------------------------------------------- |
+| `submit_implementation` | Revision-bound implementation result, summary, evidence or blocker.                     |
+| `submit_review`         | Revision-bound verdict, findings, criterion satisfaction and evidence.                  |
+| `bash`                  | Claith's persisted-output, timeout/cancellation-aware command tool for the implementer. |
+| `read_diff`             | Read the stored diff for the reviewer's exact candidate.                                |
 
-`src/domain/contracts.ts` currently defines a task-level `DeliveryContract` with twelve mandatory fields:
+The low-level registry still describes the former read-only orchestrator role and `submit_proposal`; no active planner/coordinator workflow uses it in this runner. New custom tools require registry metadata and implementations. The Pi adapter allows one correction prompt for malformed/missing structured completion, waits for the session to finish and flushes audit logs.
 
-| Field              | Current validation/meaning                                                                                                   |
-| ------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
-| `taskId`           | Task identity.                                                                                                               |
-| `version`          | Positive integer; revised proposals must increase the version.                                                               |
-| `startingRevision` | Expected Git base revision.                                                                                                  |
-| `title`, `outcome` | Nonempty descriptive text.                                                                                                   |
-| `boundaries`       | At least one textual scope boundary. These are instructions, not enforced path restrictions.                                 |
-| `dependencies`     | Unique accepted predecessor task IDs; may be empty.                                                                          |
-| `acceptance`       | At least one criterion with required `id`, `text`, `mode`, and nullable `checkId`. Modes are `check`, `review`, and `human`. |
-| `setup`            | Commands with `id` and `command`; may be empty.                                                                              |
-| `checks`           | At least one command with `id` and `command`, even if criteria otherwise use review/human modes.                             |
-| `review`           | Boolean controlling optional review in the existing loop.                                                                    |
-| `endpoint`         | Only `local-commit` is implemented.                                                                                          |
+## Activities and verification
 
-A check criterion must name an existing check; other modes require `checkId = null`, and review criteria require `review = true`. IDs must be unique in their relevant lists. The workflow checks actual check results, revision identity, required review, and requested human criteria. Evidence-reference validation is not a complete semantic proof of the desired behavior. The current `goalComplete` proposal can close a session; mandatory final phase acceptance is not implemented.
+The worker registers `prepare`, `setup`, `implement`, `candidate`, `check`, `review`, `integrate`, `push`, `cleanup`, and `record`. Role Workflows coordinate agent Activities; Git, model, filesystem and network operations remain Activities. The parent records stage/attempt history and session references, and is complete only after confirmed delivery and cleanup. Cancellation waits for active effects and preserves state; it does not roll back completed pushes.
 
-The target separates a stable phase contract from the evolving task plan, makes the implementation quality gates mandatory, and adds integration, phase evidence, and human acceptance. It must preserve useful existing session, tool, evidence, and recovery behavior rather than reintroducing task-by-task approval.
-
-## Existing verification and remaining work
-
-`tests/` covers configuration, permissions, Pi protocol, terminal control, workflows, workspaces, and opt-in recovery. `docs/acceptance.md` records a successful real Pi task and worker/service recovery evidence from 2026-10-27; its counts and branch references describe that historical run. It does not prove phase delivery, integration/push, SQLite task persistence, or publishing.
-
-The current runtime starts from the supplied project revision and chains accepted task commits, not from an enforced `dev` integration policy. Every task still requires approval; the worker performs activities sequentially, with `maxRepairs = 2` shared across initial implementation repairs and check/review feedback. Technical activity retry is configured to one attempt; uncertain failures can require a scoped human recovery decision. Linux process/subprocess ownership reconciliation is implemented.
-
-See [[project_phase-one]] for the next phase-based slice. Application SQLite details, phase interfaces, final acceptance/correction commands, and publication workflows remain implementation work. The separate control UI and broader deployment packaging remain open choices.
+Targeted tests cover contract validation, permission snapshots, session recovery, distinct repair sessions, reviewer gates, budget/blocker decisions, real Git integration/push/cleanup against bare fixture remotes, duplicate submission, and end-to-end delivery with agent doubles. Opt-in recovery exercises worker/service restart while blocked and SIGKILL during an agent effect, followed by reconciliation and same-session continuation. These are task-runner checks, not proof of autonomous phase planning or milestone publishing.

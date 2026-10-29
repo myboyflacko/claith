@@ -17,7 +17,6 @@ export function agentProfile(
 
 export function agentProfiles() {
   return {
-    orchestrator: agentProfile("orchestrator"),
     implementer: agentProfile("implementer"),
     reviewer: agentProfile("reviewer"),
   };

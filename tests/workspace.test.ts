@@ -1,223 +1,246 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { runtimeSchema } from "../src/configuration.js";
-import { agentProfiles } from "./fixtures/profiles.js";
-import type {
-  AttemptInput,
-  Candidate,
-  TaskInput,
-  TaskResult,
-} from "../src/domain/contracts.js";
+import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
+import type { AttemptInput, ReviewInput } from "../src/domain/contracts.js";
 import {
-  assertRevision,
   git,
-  runSetup,
   workspaceActivities,
+  assertRevision,
+  runSetup,
 } from "../src/workspace/git.js";
+import { writeJson, readJson, projectId } from "../src/workspace/storage.js";
 import { withOwnership } from "../src/workspace/ownership.js";
-import { readJson, writeJson } from "../src/workspace/storage.js";
 import { runCommand } from "../src/workspace/process.js";
-
+import { projectFixture, acceptedReview } from "./fixtures/task.js";
 let temp: string;
+let fixture: Awaited<ReturnType<typeof projectFixture>>;
 let project: string;
-let input: TaskInput;
 beforeEach(async () => {
-  temp = await mkdtemp(join(tmpdir(), "claith-workspace-"));
-  project = join(temp, "project");
-  await mkdir(project);
-  await git(project, "init", "-b", "dev");
-  await git(project, "config", "user.name", "Test");
-  await git(project, "config", "user.email", "test@example.invalid");
-  await writeFile(join(project, "source.txt"), "original");
-  await git(project, "add", ".");
-  await git(project, "commit", "-m", "initial");
-  const startingRevision = await git(project, "rev-parse", "HEAD");
-  input = {
-    sessionId: "session",
-    project,
-    executionId: "task-one",
-    coordinatorId: "session",
-    dependencies: [],
-    configuration: {
-      runtime: runtimeSchema.parse({}),
-      agents: agentProfiles(),
-    },
-    contract: {
-      taskId: "one",
-      version: 1,
-      startingRevision,
-      title: "Task one",
-      outcome: "Change source",
-      boundaries: ["source.txt"],
-      dependencies: [],
-      acceptance: [
-        { id: "works", text: "works", mode: "check", checkId: "test" },
-      ],
-      setup: [],
-      checks: [{ id: "test", command: "test -f source.txt" }],
-      review: false,
-      endpoint: "local-commit",
-    },
-  };
+  temp = await mkdtemp(join(tmpdir(), "claith-delivery-"));
+  fixture = await projectFixture(temp);
+  project = fixture.project;
 });
 afterEach(async () => {
   vi.unstubAllEnvs();
   await rm(temp, { recursive: true, force: true });
 });
 async function candidate() {
-  const activities = workspaceActivities(join(temp, "state"));
+  const { root, input } = fixture;
+  const activities = workspaceActivities(root);
   const workspace = await activities.prepare(input);
+  await activities.setup({ ...input, workspace });
   await writeFile(join(workspace.path, "source.txt"), "changed");
-  const attempt: AttemptInput = {
-    ...input,
-    workspace,
-    attempt: 0,
-    feedback: "",
+  const work: AttemptInput = { ...input, workspace, attempt: 0, feedback: "" };
+  const result = await activities.candidate(work);
+  const reviewInput: ReviewInput = { ...work, candidate: result, checks: [] };
+  reviewInput.checks = await activities.check(reviewInput);
+  const review = {
+    sessionId: "review",
+    submission: acceptedReview(reviewInput),
   };
-  const result = await activities.candidate({
-    ...attempt,
-    implementation: {
-      status: "submitted",
-      summary: "changed",
-      evidence: [{ criterionId: "works", references: ["test"] }],
-    },
-  });
-  return { activities, attempt, result };
+  await writeJson(
+    join(workspace.artifactDir, "reviewer-0", "result.json"),
+    review,
+  );
+  return { activities, work, reviewInput, review, result };
 }
-describe("isolated workspace and evidence", () => {
-  it("chains separate branches/worktrees on accepted commits and reconciles commit checkpoints", async () => {
-    const { activities, attempt, result } = await candidate();
-    const checks = await activities.check({ ...attempt, candidate: result });
-    const accepted: TaskResult = {
-      taskId: "one",
-      executionId: input.executionId,
-      acceptedCommit: result.revision,
-      workspace: attempt.workspace,
-      checks,
-      review: null,
-      evidence: result.implementation.evidence,
-      humanConfirmations: [],
-      blockers: [],
-    };
-    await activities.accept({ ...attempt, result: accepted });
-    await rm(join(attempt.workspace.artifactDir, "candidate-0.json"));
-    const recovered = await activities.candidate({
-      ...attempt,
-      implementation: result.implementation,
-    });
-    expect(recovered.revision).toBe(result.revision);
-    const second = await activities.prepare({
-      ...input,
-      executionId: "task-two",
-      dependencies: [accepted],
-      contract: {
-        ...input.contract,
-        taskId: "two",
-        startingRevision: result.revision,
-        dependencies: ["one"],
-      },
-    });
-    expect(second.path).not.toBe(attempt.workspace.path);
-    expect(second.branch).not.toBe(attempt.workspace.branch);
-    expect(await git(second.path, "rev-parse", "HEAD")).toBe(result.revision);
-    expect(await readFile(join(second.path, "source.txt"), "utf8")).toBe(
-      "changed",
+describe("verified Git delivery", () => {
+  it("coordinates integration across different worktree entrypoints of the same repository", async () => {
+    const activities = workspaceActivities(fixture.root);
+    await activities.prepare(fixture.input);
+    const alternate = join(temp, "alternate");
+    await git(
+      project,
+      "worktree",
+      "add",
+      "-b",
+      "inspection",
+      alternate,
+      fixture.input.contract.startCommit,
     );
-    expect(await git(project, "branch", "--show-current")).toBe("dev");
-    expect(
-      await readJson(join(attempt.workspace.artifactDir, "accepted.json")),
-    ).toEqual(accepted);
-  });
-
-  it("invalidates checks when source changes even if a command succeeds", async () => {
-    input.contract.checks[0]!.command = "printf mutated > source.txt";
-    const { activities, attempt, result } = await candidate();
-    const checks = await activities.check({ ...attempt, candidate: result });
-    expect(checks[0]).toMatchObject({
-      exitCode: 0,
-      unchanged: false,
-      revision: result.revision,
-    });
-    await expect(
-      assertRevision(attempt.workspace, result.revision),
-    ).rejects.toThrow("differs");
-  });
-
-  it("invalidates evidence when a check changes and restores a tracked source file", async () => {
-    input.contract.checks[0]!.command =
-      "printf temporary > source.txt; git restore source.txt";
-    const { activities, attempt, result } = await candidate();
-    const checks = await activities.check({ ...attempt, candidate: result });
-    await assertRevision(attempt.workspace, result.revision);
-    expect(checks[0]?.unchanged).toBe(false);
-  });
-
-  it("refuses ownership while an orphan subprocess group can still write", async () => {
-    const { attempt } = await candidate();
-    const controller = new AbortController();
-    const output = join(attempt.workspace.artifactDir, "orphan.log");
-    const running = runCommand("sleep 30", {
-      cwd: attempt.workspace.path,
-      output,
-      timeoutMs: 60_000,
-      signal: controller.signal,
-    });
-    try {
-      for (
-        let i = 0;
-        i < 100 && !(await readJson(output + ".process.json"));
-        i++
-      )
-        await new Promise((resolve) => setTimeout(resolve, 10));
-      await expect(
-        withOwnership(attempt.workspace.artifactDir, async () => {}),
-      ).rejects.toThrow("still has a live writer");
-    } finally {
-      controller.abort();
-      await running;
-    }
-    await expect(
-      withOwnership(attempt.workspace.artifactDir, async () => "safe"),
-    ).resolves.toBe("safe");
-  });
-
-  it("does not repeat a setup operation whose outcome is uncertain", async () => {
-    input.contract.setup = [
-      { id: "install", command: "touch unexpected-effect" },
-    ];
-    const { attempt } = await candidate();
-    await writeJson(
-      join(attempt.workspace.artifactDir, "setup-0-install.started.json"),
-      { command: input.contract.setup[0] },
+    const lock = join(
+      fixture.root,
+      "sessions",
+      ".integration-locks",
+      projectId(join(project, ".git")),
     );
-    await expect(runSetup(attempt)).rejects.toThrow("uncertain outcome");
-    await expect(
-      readFile(join(attempt.workspace.path, "unexpected-effect")),
-    ).rejects.toMatchObject({ code: "ENOENT" });
-  });
-
-  it("rejects cached checks against another revision and rejects an overlapping writer", async () => {
-    const { activities, attempt, result } = await candidate();
-    await activities.check({ ...attempt, candidate: result });
-    await withOwnership(attempt.workspace.artifactDir, async () => {
+    await withOwnership(lock, async () => {
       await expect(
-        activities.check({ ...attempt, candidate: result }),
+        activities.prepare({
+          ...fixture.input,
+          runId: "other-task",
+          project: alternate,
+        }),
       ).rejects.toThrow("already has a writer");
     });
-    await git(
-      attempt.workspace.path,
-      "commit",
-      "--allow-empty",
-      "-m",
-      "another revision",
+  });
+  it("merges, checks, pushes exact revision, reconciles a lost push acknowledgement, and cleans up idempotently", async () => {
+    const { activities, work, reviewInput, review } = await candidate();
+    const integration = await activities.integrate({ ...reviewInput, review });
+    expect(await git(project, "rev-parse", "dev")).toBe(
+      fixture.input.contract.startCommit,
+    );
+    expect(
+      (await git(integration.path, "show", "-s", "--format=%P", "HEAD")).split(
+        " ",
+      ),
+    ).toHaveLength(2);
+    const delivery = {
+      ...fixture.input,
+      workspace: work.workspace,
+      integration,
+    };
+    await activities.push(delivery);
+    await rm(join(work.workspace.artifactDir, "pushed.json"));
+    await activities.push(delivery);
+    expect(await git(project, "rev-parse", "dev")).toBe(integration.revision);
+    expect(await git(fixture.remote, "rev-parse", "dev")).toBe(
+      integration.revision,
+    );
+    await activities.cleanup(delivery);
+    await activities.cleanup(delivery);
+    expect(await git(project, "branch", "--list", work.workspace.branch)).toBe(
+      "",
+    );
+    expect(
+      await readJson(join(work.workspace.artifactDir, "candidate-0.json")),
+    ).not.toBeNull();
+  });
+  it("recovers a candidate commit whose checkpoint was lost", async () => {
+    const { activities, work, result } = await candidate();
+    await rm(join(work.workspace.artifactDir, "candidate-0.json"));
+    expect((await activities.candidate(work)).revision).toBe(result.revision);
+  });
+  it("blocks a changed local or remote development base", async () => {
+    const { activities, reviewInput, review } = await candidate();
+    await git(project, "commit", "--allow-empty", "-m", "other work");
+    await expect(
+      activities.integrate({ ...reviewInput, review }),
+    ).rejects.toThrow("Development base changed");
+    await expect(activities.prepare(fixture.input)).rejects.toThrow(
+      "Development base changed",
+    );
+  });
+  it("does not modify dev when integration checks fail", async () => {
+    fixture.input.contract.checks[0]!.command =
+      'test "$(git rev-list --parents -n 1 HEAD | wc -w)" -eq 2';
+    const { activities, reviewInput, review } = await candidate();
+    const integration = await activities.integrate({ ...reviewInput, review });
+    expect(integration.checks[0]!.exitCode).not.toBe(0);
+    expect(await git(project, "rev-parse", "dev")).toBe(
+      fixture.input.contract.startCommit,
+    );
+  });
+  it("cleans up earlier rejected integration branches after a successful repair", async () => {
+    fixture.input.contract.checks[0]!.command =
+      'test "$(git rev-list --parents -n 1 HEAD | wc -w)" -eq 2 || grep -q repaired source.txt';
+    const { activities, work, reviewInput, review } = await candidate();
+    const rejected = await activities.integrate({ ...reviewInput, review });
+    expect(rejected.checks[0]!.exitCode).not.toBe(0);
+    const next = { ...work, attempt: 1 };
+    await writeFile(join(work.workspace.path, "source.txt"), "repaired");
+    const result = await activities.candidate(next);
+    const checked = {
+      ...next,
+      candidate: result,
+      checks: [] as ReviewInput["checks"],
+    };
+    checked.checks = await activities.check(checked);
+    const accepted = {
+      sessionId: "review-1",
+      submission: acceptedReview(checked),
+    };
+    await writeJson(
+      join(work.workspace.artifactDir, "reviewer-1", "result.json"),
+      accepted,
+    );
+    const integration = await activities.integrate({
+      ...checked,
+      review: accepted,
+    });
+    const delivery = {
+      ...fixture.input,
+      workspace: work.workspace,
+      integration,
+    };
+    await activities.push(delivery);
+    await activities.cleanup(delivery);
+    expect(await git(project, "branch", "--list", rejected.branch)).toBe("");
+  });
+  it("retains the accepted candidate after a rejected push and resumes delivery only", async () => {
+    const { activities, work, reviewInput, review, result } = await candidate();
+    const integration = await activities.integrate({ ...reviewInput, review });
+    const delivery = {
+      ...fixture.input,
+      workspace: work.workspace,
+      integration,
+    };
+    const hook = join(fixture.remote, "hooks", "pre-receive");
+    await writeFile(hook, "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+    await expect(activities.push(delivery)).rejects.toThrow();
+    expect(await git(project, "rev-parse", "dev")).toBe(integration.revision);
+    expect(await git(fixture.remote, "rev-parse", "dev")).toBe(
+      fixture.input.contract.startCommit,
+    );
+    await expect(activities.cleanup(delivery)).rejects.toThrow(
+      "confirmed push",
+    );
+    await rm(hook);
+    await activities.push(delivery);
+    expect(await git(work.workspace.path, "rev-parse", "HEAD")).toBe(
+      result.revision,
+    );
+    await activities.cleanup(delivery);
+  });
+  it("rejects a forged review or altered check evidence", async () => {
+    const { activities, reviewInput, review } = await candidate();
+    await writeJson(
+      join(reviewInput.workspace.artifactDir, "checks-0.json"),
+      [],
     );
     await expect(
-      activities.check({ ...attempt, candidate: result }),
-    ).rejects.toThrow("differs");
+      activities.integrate({ ...reviewInput, review }),
+    ).rejects.toThrow("recorded review/check");
   });
-
+  it.each([
+    "printf mutated > source.txt",
+    "printf temporary > source.txt; git restore source.txt",
+  ])(
+    "invalidates modifying checks, including restored content: %s",
+    async (command) => {
+      fixture.input.contract.checks[0]!.command = command;
+      const { reviewInput } = await candidate();
+      expect(reviewInput.checks[0]!.unchanged).toBe(false);
+    },
+  );
+  it("preserves uncertain setup and refuses overlapping writers", async () => {
+    const { work } = await candidate();
+    work.contract.setup = [{ id: "install", command: "touch unexpected" }];
+    await writeJson(
+      join(work.workspace.artifactDir, "setup-install.started.json"),
+      {},
+    );
+    await expect(runSetup(work)).rejects.toThrow("uncertain outcome");
+    await withOwnership(work.workspace.artifactDir, async () => {
+      await expect(
+        workspaceActivities(fixture.root).candidate(work),
+      ).rejects.toThrow("already has a writer");
+    });
+  });
+  it("rejects revision changes and run identity reuse", async () => {
+    const { activities, work, result } = await candidate();
+    await git(work.workspace.path, "commit", "--allow-empty", "-m", "other");
+    await expect(
+      assertRevision(work.workspace, result.revision),
+    ).rejects.toThrow("differs");
+    await expect(
+      activities.prepare({
+        ...fixture.input,
+        contract: { ...fixture.input.contract, title: "changed" },
+      }),
+    ).rejects.toThrow("different input");
+  });
   it("preserves failed subprocess output and cancels a running command", async () => {
     const output = join(temp, "command.log");
     expect(
@@ -263,44 +286,5 @@ describe("isolated workspace and evidence", () => {
     });
     expect(await readFile(output, "utf8")).not.toContain("EALLOWSCRIPTS");
     expect(exitCode).toBe(0);
-  });
-
-  it("refuses an approval identity reused with different contents", async () => {
-    const activities = workspaceActivities(join(temp, "state"));
-    await activities.prepare(input);
-    await expect(
-      activities.prepare({
-        ...input,
-        contract: { ...input.contract, title: "different" },
-      }),
-    ).rejects.toThrow("another approval");
-  });
-
-  it("fails closed when acceptance artifacts are absent or altered", async () => {
-    const { activities, attempt, result } = await candidate();
-    const checkInput = { ...attempt, candidate: result };
-    const checks = await activities.check(checkInput);
-    await writeJson(join(attempt.workspace.artifactDir, "checks-0.json"), []);
-    await expect(
-      activities.accept({
-        ...attempt,
-        result: {
-          taskId: "one",
-          executionId: input.executionId,
-          acceptedCommit: result.revision,
-          workspace: attempt.workspace,
-          checks,
-          review: null,
-          evidence: [],
-          humanConfirmations: [],
-          blockers: [],
-        },
-      }),
-    ).rejects.toThrow("recorded checks");
-    expect(
-      await readJson<Candidate>(
-        join(attempt.workspace.artifactDir, "candidate-0.json"),
-      ),
-    ).not.toBeNull();
   });
 });

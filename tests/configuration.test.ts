@@ -16,7 +16,7 @@ import { bootstrap } from "../src/bootstrap.js";
 import { createDirectories } from "../src/infrastructure/directories.js";
 import { appSettings } from "../src/settings.js";
 import { parse } from "smol-toml";
-import { roles } from "../src/configuration.js";
+import { executionRoles as roles } from "../src/configuration.js";
 
 const execFileAsync = promisify(execFile);
 let temporaryDirectory: string;
@@ -153,6 +153,10 @@ describe("runtime configuration", () => {
     const entries = await readdir(temporaryDirectory);
     expect(entries).toContain("config.toml");
     expect(entries).not.toContain("claith.toml");
+    expect((await readdir(join(temporaryDirectory, "agents"))).sort()).toEqual([
+      "implementer.toml",
+      "reviewer.toml",
+    ]);
     for (const role of roles) {
       const path = join(temporaryDirectory, "agents", `${role}.toml`);
       const template = await readFile(path, "utf8");
@@ -185,12 +189,11 @@ describe("runtime configuration", () => {
   });
 
   it.each([
-    ["orchestrator", "", "permissions"],
-    ["orchestrator", 'permissions = "read-write"', "must be read-only"],
+    ["implementer", "", "permissions"],
     ["reviewer", 'permissions = "read-write"', "must be read-only"],
-    ["orchestrator", 'permissions = "all"', "permissions"],
+    ["implementer", 'permissions = "all"', "permissions"],
     [
-      "orchestrator",
+      "implementer",
       'permissions = "read-only"\ntools = ["bash"]',
       "Unrecognized key",
     ],
@@ -266,9 +269,9 @@ describe("runtime configuration", () => {
       "heartbeatIntervalSeconds",
     );
     await writeFile(join(temporaryDirectory, "config.toml"), "");
-    await rm(join(temporaryDirectory, "agents", "orchestrator.toml"));
+    await rm(join(temporaryDirectory, "agents", "implementer.toml"));
     await expect(loadConfiguration(temporaryDirectory)).rejects.toThrow(
-      "orchestrator.toml",
+      "implementer.toml",
     );
   });
 });

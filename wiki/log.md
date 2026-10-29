@@ -56,3 +56,10 @@ Last changed by: Codex
 - Revised [[project_phase-one]] and navigation to separate the implemented task baseline and its recorded evidence from the next phase-delivery slice. Historical research and existing evidence were preserved.
 
 Last changed by: Codex
+
+## [2026-10-29] update | direct task delivery with role child workflows
+
+- Updated [[architecture_tooling]], [[architecture_delivery-runtime]], [[project_repository-structure]] and [[project_phase-one]] for the direct single-task runner, new contract/execution records, separate role Child Workflows, fresh repair sessions, verified dev delivery/push/cleanup and scoped recovery.
+- Distinguished the removed planner-chat flow and its historical evidence from current task delivery; phase orchestration, application SQLite and final human acceptance remain future work.
+
+Last changed by: Codex

@@ -15,13 +15,13 @@
 | `src/bootstrap.ts`                        | Directory-only startup initialization                                                    |
 | `src/settings.ts`                         | Central ~/.claith location                                                               |
 | `src/configuration.ts`                    | config.toml and role-profile loading; non-overwriting explicit init                       |
-| `src/domain/`                             | Runtime/profile schemas, tool registry, contracts, snapshots, and activity interfaces   |
-| `src/runtime/`                            | Temporal coordinator/child workflows, client, activities, and native worker              |
-| `src/workspace/`                          | Worktrees, ownership reconciliation, processes, candidate commits, and evidence storage  |
+| `src/domain/`                             | Runtime/profile schemas, tool registry, task contracts, run records, and activity interfaces   |
+| `src/runtime/`                            | Task parent and role child workflows, direct client, activities, and native worker              |
+| `src/workspace/`                          | Worktrees, ownership, checked integration, push reconciliation, cleanup, and evidence  |
 | `src/agents/`                             | Pi role sessions, effective tool allowlists, structured completion, and audit logs       |
-| `src/cli/`                                | Terminal conversation, approvals, scoped decisions, reconnect, and cancellation          |
+| `src/cli/`                                | Direct task submission, JSON status, scoped resume, and cancellation          |
 | `tests/`                                  | Targeted configuration, workflow, workspace, Pi, terminal, and opt-in recovery checks    |
-| `tests/fixtures/`                         | Isolated Temporal service fixtures                                                       |
+| `tests/fixtures/`                         | Isolated Temporal, Git, Pi and interrupted-worker fixtures                                                       |
 | `docs/acceptance.md`                      | Real Pi acceptance procedure and recorded evidence                                       |
 | `docker-compose.yml`                      | Persistent local Temporal development API and Web UI                                     |
 | `wiki/index.md`                           | Durable project knowledge entrypoint                                                     |

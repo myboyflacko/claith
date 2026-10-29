@@ -1,29 +1,27 @@
 import { Context } from "@temporalio/activity";
-import type { Activities } from "../domain/contracts.js";
+import { join } from "node:path";
+import type { Activities, RunInput, RunRecord } from "../domain/contracts.js";
 import { piActivities } from "../agents/pi.js";
 import type { SessionFactory } from "../agents/pi.js";
 import { workspaceActivities } from "../workspace/git.js";
-import { join } from "node:path";
 import { logEvent } from "../workspace/storage.js";
-
 export function createActivities(
   root: string,
   factory?: SessionFactory,
 ): Activities {
   function register<K extends keyof Activities>(name: K): Activities[K] {
-    return (async (input: Parameters<Activities[K]>[0]) => {
+    return (async (input: RunInput | RunRecord) => {
       const context = Context.current();
-      const sessionId =
-        "sessionId" in input ? input.sessionId : input.session.sessionId;
-      const executionId =
-        "executionId" in input ? input.executionId : "orchestrator";
-      const path = join(root, "log", `${sessionId}-runtime.jsonl`);
+      const runId = "execution" in input ? input.execution.runId : input.runId;
+      const configuration =
+        "execution" in input
+          ? input.execution.configuration
+          : input.configuration;
       const event = {
-        project: "project" in input ? input.project : input.session.project,
-        taskId: "contract" in input ? input.contract.taskId : null,
+        runId,
+        project: "execution" in input ? input.execution.project : input.project,
+        taskId: input.contract.taskId,
         taskAttempt: "attempt" in input ? input.attempt : null,
-        sessionId,
-        executionId,
         activity: name,
         activityId: context.info.activityId,
         attempt: context.info.attempt,
@@ -32,23 +30,27 @@ export function createActivities(
       heartbeat();
       const timer = setInterval(
         heartbeat,
-        input.configuration.runtime.heartbeatIntervalSeconds * 1000,
+        configuration.runtime.heartbeatIntervalSeconds * 1000,
       );
       try {
-        await logEvent(path, { ...event, state: "start" });
-        const adapters: Activities = {
+        await logEvent(join(root, "log", `${runId}-runtime.jsonl`), {
+          ...event,
+          state: "start",
+        });
+        const adapters = {
           ...workspaceActivities(root, context.cancellationSignal),
           ...piActivities(root, context.cancellationSignal, factory),
         };
-        // Each registered method keeps its own strongly typed public signature.
-        const activity = adapters[name] as (
-          value: typeof input,
-        ) => Promise<unknown>;
-        const result = await activity(input);
-        await logEvent(path, { ...event, state: "complete" });
+        const result = await (
+          adapters[name] as (v: unknown) => Promise<unknown>
+        )(input);
+        await logEvent(join(root, "log", `${runId}-runtime.jsonl`), {
+          ...event,
+          state: "complete",
+        });
         return result;
       } catch (error) {
-        await logEvent(path, {
+        await logEvent(join(root, "log", `${runId}-runtime.jsonl`), {
           ...event,
           state: "failed",
           error: String(error),
@@ -60,12 +62,15 @@ export function createActivities(
     }) as Activities[K];
   }
   return {
-    plan: register("plan"),
     prepare: register("prepare"),
+    setup: register("setup"),
     implement: register("implement"),
     candidate: register("candidate"),
     check: register("check"),
     review: register("review"),
-    accept: register("accept"),
+    integrate: register("integrate"),
+    push: register("push"),
+    cleanup: register("cleanup"),
+    record: register("record"),
   };
 }

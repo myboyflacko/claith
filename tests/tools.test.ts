@@ -25,14 +25,18 @@ describe("tool permissions and execution snapshots", () => {
   it.each(["orchestrator", "reviewer"] as const)(
     "rejects read-write for %s at execution boundaries",
     (role) => {
-      const agents = agentProfiles();
-      agents[role].permissions = "read-write";
-      expect(() => executionProfileSchema(role).parse(agents[role])).toThrow(
+      const profile = agentProfile(role);
+      profile.permissions = "read-write";
+      expect(() => executionProfileSchema(role).parse(profile)).toThrow(
         `${role} permissions must be read-only`,
       );
-      expect(() =>
-        executionConfigurationSchema.parse({ runtime: {}, agents }),
-      ).toThrow(`${role} permissions must be read-only`);
+      if (role === "reviewer")
+        expect(() =>
+          executionConfigurationSchema.parse({
+            runtime: {},
+            agents: { ...agentProfiles(), reviewer: profile },
+          }),
+        ).toThrow("reviewer permissions must be read-only");
     },
   );
 

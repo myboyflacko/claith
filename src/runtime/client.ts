@@ -1,19 +1,18 @@
 import { randomUUID } from "node:crypto";
 import { realpath } from "node:fs/promises";
-import { Client, Connection, WorkflowIdReusePolicy } from "@temporalio/client";
+import {
+  Client,
+  Connection,
+  WorkflowExecutionAlreadyStartedError,
+  WorkflowIdReusePolicy,
+} from "@temporalio/client";
 import type {
   ExecutionConfiguration,
   RuntimeSettings,
 } from "../configuration.js";
-import { identity } from "../domain/contracts.js";
-import type {
-  Approval,
-  Conversation,
-  Decision,
-  SessionSnapshot,
-} from "../domain/contracts.js";
-import { git } from "../workspace/git.js";
-
+import { contractSchema, runIdentity } from "../domain/contracts.js";
+import type { RunInput, RunRecord, TaskContract } from "../domain/contracts.js";
+import { projectId } from "../workspace/storage.js";
 export class DeliveryClient {
   constructor(
     readonly client: Client,
@@ -29,52 +28,58 @@ export class DeliveryClient {
   async close(): Promise<void> {
     await this.client.connection.close();
   }
-  async create(
+  async run(
     projectPath: string,
+    value: TaskContract,
     configuration: ExecutionConfiguration,
-    sessionId = randomUUID(),
   ): Promise<string> {
-    identity.parse(sessionId);
+    const contract = contractSchema.parse(value);
     const project = await realpath(projectPath);
-    const startingRevision = await git(project, "rev-parse", "HEAD");
-    await this.client.workflow.start("coordinator", {
-      workflowId: sessionId,
-      taskQueue: this.taskQueue,
-      workflowIdReusePolicy: WorkflowIdReusePolicy.REJECT_DUPLICATE,
-      args: [{ sessionId, project, startingRevision, configuration }],
+    const runId = `task-${projectId(project)}-${contract.taskId}-v${contract.version}`;
+    const input: RunInput = { runId, project, contract, configuration };
+    try {
+      await this.client.workflow.start("taskWorkflow", {
+        workflowId: runId,
+        taskQueue: this.taskQueue,
+        workflowIdReusePolicy: WorkflowIdReusePolicy.REJECT_DUPLICATE,
+        args: [input],
+      });
+    } catch (error) {
+      if (!(error instanceof WorkflowExecutionAlreadyStartedError)) throw error;
+      const old = await this.status(runId);
+      if (
+        JSON.stringify(old.contract) !== JSON.stringify(contract) ||
+        old.execution.project !== project ||
+        JSON.stringify(old.execution.configuration) !==
+          JSON.stringify(configuration)
+      )
+        throw new Error("Run identity already belongs to different input", {
+          cause: error,
+        });
+    }
+    return runId;
+  }
+  status(runId: string): Promise<RunRecord> {
+    runIdentity.parse(runId);
+    return this.client.workflow.getHandle(runId).query("status");
+  }
+  async resume(runId: string, additionalRepairs = 0): Promise<string> {
+    const record = await this.status(runId);
+    if (!record.execution.blocked) throw new Error("Run is not blocked");
+    return this.client.workflow.getHandle(runId).executeUpdate("resume", {
+      args: [
+        {
+          commandId: randomUUID(),
+          blockerId: record.execution.blocked.id,
+          additionalRepairs,
+        },
+      ],
     });
-    return sessionId;
   }
-  status(sessionId: string): Promise<SessionSnapshot> {
-    return this.client.workflow.getHandle(sessionId).query("status");
-  }
-  conversation(sessionId: string, message: Conversation): Promise<string> {
+  cancel(runId: string): Promise<string> {
+    runIdentity.parse(runId);
     return this.client.workflow
-      .getHandle(sessionId)
-      .executeUpdate("conversation", { args: [message] });
-  }
-  async approve(sessionId: string, approval: Approval): Promise<string> {
-    const snapshot = await this.status(sessionId);
-    const executionId = `${sessionId}-${approval.taskId}-v${approval.version}`;
-    if (
-      snapshot.acceptedResults.some(
-        (result) => result.executionId === executionId,
-      ) ||
-      snapshot.currentTask?.executionId === executionId
-    )
-      return executionId;
-    return this.client.workflow
-      .getHandle(sessionId)
-      .executeUpdate("approve", { args: [approval] });
-  }
-  answer(sessionId: string, decision: Decision): Promise<string> {
-    return this.client.workflow
-      .getHandle(sessionId)
-      .executeUpdate("decision", { args: [decision] });
-  }
-  cancel(sessionId: string, commandId = randomUUID()): Promise<string> {
-    return this.client.workflow
-      .getHandle(sessionId)
-      .executeUpdate("cancel", { args: [commandId] });
+      .getHandle(runId)
+      .executeUpdate("cancel", { args: [randomUUID()] });
   }
 }

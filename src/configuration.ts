@@ -4,7 +4,7 @@ import { parse, stringify } from "smol-toml";
 import { createDirectories } from "./infrastructure/directories.js";
 
 import {
-  roles,
+  executionRoles,
   resolveProfile,
   runtimeSchema,
 } from "./domain/configuration.js";
@@ -12,7 +12,7 @@ import { rolePolicy } from "./domain/tools.js";
 import type {
   ExecutionAgentProfile,
   ExecutionConfiguration,
-  Role,
+  ExecutionRole,
 } from "./domain/configuration.js";
 export * from "./domain/configuration.js";
 
@@ -36,8 +36,8 @@ export async function loadConfiguration(
     throw new Error(
       `Invalid settings in ${runtimePath}: ${runtime.error.message}`,
     );
-  const agents = {} as Record<Role, ExecutionAgentProfile>;
-  for (const role of roles) {
+  const agents = {} as Record<ExecutionRole, ExecutionAgentProfile>;
+  for (const role of executionRoles) {
     const path = join(configDir, "agents", `${role}.toml`);
     const value = await loadToml(path);
     try {
@@ -59,7 +59,7 @@ export async function initializeConfiguration(
   const templates: [string, string][] = [
     ["config.toml", stringify(runtimeSchema.parse({}))],
   ];
-  for (const role of roles) {
+  for (const role of executionRoles) {
     templates.push([
       join("agents", `${role}.toml`),
       "# Select a provider and model available in your existing Pi login.\n" +

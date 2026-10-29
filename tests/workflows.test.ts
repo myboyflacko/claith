@@ -1,461 +1,421 @@
 import { randomUUID } from "node:crypto";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, afterAll, describe, expect, it } from "vitest";
 import { TestWorkflowEnvironment } from "@temporalio/testing";
-import { Worker } from "@temporalio/worker";
-import { runtimeSchema } from "../src/configuration.js";
-import type { ExecutionConfiguration } from "../src/configuration.js";
-import { agentProfile, agentProfiles } from "./fixtures/profiles.js";
-import type {
-  Activities,
-  DeliveryContract,
-  SessionSnapshot,
-} from "../src/domain/contracts.js";
+import { Context } from "@temporalio/activity";
+import { Worker, bundleWorkflowCode } from "@temporalio/worker";
+import type { Activities, RunRecord } from "../src/domain/contracts.js";
+import { taskInput, acceptedReview, projectFixture } from "./fixtures/task.js";
+import { createActivities } from "../src/runtime/activities.js";
+import { fixtureFactory } from "./fixtures/agent.js";
+import { git } from "../src/workspace/git.js";
+import { DeliveryClient } from "../src/runtime/client.js";
+import { readJson } from "../src/workspace/storage.js";
 
-export const configuration = {
-  runtime: runtimeSchema.parse({ reminderSeconds: 3600 }),
-  agents: agentProfiles(),
-};
-export const contract: DeliveryContract = {
-  taskId: "task-one",
-  version: 1,
-  startingRevision: "a".repeat(40),
-  title: "Implement task",
-  outcome: "Works",
-  boundaries: ["Only this task"],
-  dependencies: [],
-  acceptance: [
-    { id: "works", text: "Checks pass", mode: "check", checkId: "test" },
-  ],
-  setup: [],
-  checks: [{ id: "test", command: "npm test" }],
-  review: true,
-  endpoint: "local-commit",
-};
-
-describe("durable delivery workflows", () => {
+export async function waitFor(
+  query: () => Promise<RunRecord>,
+  predicate: (record: RunRecord) => boolean,
+) {
+  for (let i = 0; i < 300; i++) {
+    const record = await query();
+    if (predicate(record)) return record;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`Timed out: ${JSON.stringify(await query())}`);
+}
+describe("single-task delivery workflows", () => {
   let env: TestWorkflowEnvironment;
+  let bundle: Awaited<ReturnType<typeof bundleWorkflowCode>>;
   beforeAll(async () => {
     env = await TestWorkflowEnvironment.createTimeSkipping();
-  }, 60_000);
+    bundle = await bundleWorkflowCode({
+      workflowsPath: fileURLToPath(
+        new URL("../src/runtime/workflows.ts", import.meta.url),
+      ),
+    });
+  }, 60000);
   afterAll(async () => {
     await env?.teardown();
   });
-
   async function scenario(
     options: {
-      review?: boolean;
-      failChecks?: boolean;
-      human?: boolean;
-      changesRequested?: boolean;
-      mixedFailures?: boolean;
-      blockedFirst?: boolean;
-      unknownEvidence?: boolean;
-      staleReview?: boolean;
+      findings?: boolean;
+      endless?: boolean;
+      pushFailure?: boolean;
+      cleanupFailure?: boolean;
+      baseChanged?: boolean;
+      stale?: boolean;
+      failedChecks?: boolean;
+      integrationFailure?: boolean;
+      longImplement?: boolean;
+      finalRecordFailure?: boolean;
     } = {},
   ) {
-    const id = randomUUID();
+    const input = taskInput();
+    input.runId = randomUUID();
     const calls: string[] = [];
-    const dispatchedConfigurations: ExecutionConfiguration[] = [];
-    const c = structuredClone(contract);
-    c.review = options.review ?? true;
-    if (options.human)
-      c.acceptance.push({
-        id: "human",
-        text: "Looks right",
-        mode: "human",
-        checkId: null,
-      });
-    const workspace = {
-      path: "/workspace",
-      branch: "task",
-      base: c.startingRevision,
-      artifactDir: "/evidence",
-    };
+    let finalRecordFailure = options.finalRecordFailure;
+    let pushFailure = options.pushFailure;
+    let cleanupFailure = options.cleanupFailure;
     const activities: Activities = {
-      plan: async ({ session }) => ({
-        message: "Next",
-        outline: [],
-        contract: session.acceptedResults.length ? null : c,
-        goalComplete: session.acceptedResults.length > 0,
-      }),
-      prepare: async () => {
-        calls.push("prepare");
-        return workspace;
+      record: async (r) => {
+        if (r.execution.status === "completed" && finalRecordFailure) {
+          finalRecordFailure = false;
+          throw new Error("Storage unavailable");
+        }
+        return r.execution.sessions;
       },
-      implement: async ({ attempt, configuration }) => {
-        calls.push("implement");
-        dispatchedConfigurations.push(configuration);
+      prepare: async () => ({
+        path: "/work",
+        branch: "task",
+        base: input.contract.startCommit,
+        artifactDir: "/artifacts",
+      }),
+      setup: async () => {},
+      implement: async (i) => {
+        calls.push(`implement-${i.attempt}`);
+        if (options.longImplement) {
+          const context = Context.current();
+          const timer = setInterval(() => context.heartbeat(), 20);
+          try {
+            await new Promise<void>((resolve) => {
+              const stop = () => {
+                calls.push("implement-stopped");
+                resolve();
+              };
+              if (context.cancellationSignal.aborted) stop();
+              else
+                context.cancellationSignal.addEventListener("abort", stop, {
+                  once: true,
+                });
+            });
+          } finally {
+            clearInterval(timer);
+          }
+        }
         return {
-          status:
-            options.blockedFirst && attempt === 0 ? "blocked" : "submitted",
-          summary: "Done",
-          evidence: [
-            {
-              criterionId: "works",
-              references: [options.unknownEvidence ? "unknown" : "test"],
-            },
-          ],
-        };
-      },
-      candidate: async ({ implementation }) => ({
-        revision: "b".repeat(40),
-        diffRef: "/diff",
-        implementation,
-      }),
-      check: async ({ candidate, attempt }) => {
-        calls.push("check");
-        return [
-          {
-            id: "test",
-            command: "npm test",
-            revision: candidate.revision,
-            exitCode:
-              options.failChecks || (options.mixedFailures && attempt === 0)
-                ? 1
-                : 0,
-            unchanged: true,
-            outputRef: "/check",
+          sessionId: `implement-${i.attempt}`,
+          submission: {
+            runId: i.runId,
+            taskId: i.contract.taskId,
+            version: i.contract.version,
+            attempt: i.attempt,
+            revision: i.contract.startCommit,
+            status: "submitted",
+            summary: "Done",
+            evidence: [{ criterionId: "works", references: ["test"] }],
           },
-        ];
-      },
-      review: async ({ attempt, candidate, configuration }) => {
-        calls.push("review");
-        dispatchedConfigurations.push(configuration);
-        return {
-          taskId: c.taskId,
-          attempt,
-          revision: options.staleReview ? "c".repeat(40) : candidate.revision,
-          verdict:
-            options.changesRequested || options.mixedFailures
-              ? "changes_requested"
-              : "accepted",
-          summary: "Review",
-          evidenceRefs: ["test"],
         };
       },
-      accept: async () => {
-        calls.push("accept");
+      candidate: async (i) => ({
+        revision: (i.attempt ? "c" : "b").repeat(40),
+        diffRef: "diff",
+      }),
+      check: async (i) =>
+        i.contract.checks.map((c) => ({
+          ...c,
+          exitCode: options.failedChecks && i.attempt === 0 ? 1 : 0,
+          outputRef: "log",
+          revision: i.candidate.revision,
+          unchanged: true,
+        })),
+      review: async (i) => {
+        calls.push(`review-${i.attempt}`);
+        const value = acceptedReview(i);
+        if (options.endless || (options.findings && i.attempt === 0)) {
+          value.verdict = "changes_requested";
+          value.findings = [{ id: "fix", text: "Fix behavior" }];
+        }
+        if (options.stale) value.revision = "d".repeat(40);
+        return { sessionId: `review-${i.attempt}`, submission: value };
+      },
+      integrate: async (i) => {
+        calls.push(`integrate-${i.attempt}`);
+        if (options.baseChanged)
+          throw new Error("Development base changed; new contract required");
+        return {
+          path: "/integration",
+          branch: "integration",
+          revision: "e".repeat(40),
+          checks: i.checks.map((c) => ({
+            ...c,
+            revision: "e".repeat(40),
+            exitCode: options.integrationFailure && i.attempt === 0 ? 1 : 0,
+          })),
+        };
+      },
+      push: async () => {
+        calls.push("push");
+        if (pushFailure) {
+          pushFailure = false;
+          throw new Error("Push unavailable");
+        }
+      },
+      cleanup: async () => {
+        calls.push("cleanup");
+        if (cleanupFailure) {
+          cleanupFailure = false;
+          throw new Error("Cleanup unavailable");
+        }
       },
     };
     const worker = await Worker.create({
       connection: env.nativeConnection,
-      taskQueue: id,
-      workflowsPath: fileURLToPath(
-        new URL("../src/runtime/workflows.ts", import.meta.url),
-      ),
+      maxHeartbeatThrottleInterval: "50ms",
+      taskQueue: input.runId,
+      workflowBundle: bundle,
       activities,
     });
-    const handle = await env.client.workflow.start("coordinator", {
-      workflowId: id,
-      taskQueue: id,
-      args: [
-        {
-          sessionId: id,
-          project: "/project",
-          startingRevision: c.startingRevision,
-          configuration,
-        },
-      ],
+    const handle = await env.client.workflow.start("taskWorkflow", {
+      workflowId: input.runId,
+      taskQueue: input.runId,
+      args: [input],
     });
-    const status = () => handle.query<SessionSnapshot>("status");
-    const waitState = async (state: string) => {
-      for (let i = 0; i < 200; i++) {
-        const s = await status();
-        if (s.state === state) return s;
-        await new Promise((resolve) => setTimeout(resolve, 10));
-      }
-      throw new Error(
-        `Did not reach ${state}: ${JSON.stringify(await status())}`,
-      );
-    };
-    return {
-      id,
-      calls,
-      c,
-      worker,
-      handle,
-      status,
-      waitState,
-      dispatchedConfigurations,
-    };
+    const status = () => handle.query<RunRecord>("status");
+    return { input, worker, handle, status, calls };
   }
-
-  it.each([true, false])(
-    "gates dispatch, deduplicates approval, completes with review=%s",
-    async (review) => {
-      const s = await scenario({ review });
-      await s.worker.runUntil(async () => {
-        await s.handle.executeUpdate("conversation", {
-          args: [{ id: "message", text: "Do task" }],
-        });
-        await s.waitState("awaiting_approval");
-        expect(s.calls).toEqual([]);
-        await expect(
-          s.handle.executeUpdate("approve", {
-            args: [
-              {
-                commandId: "stale",
-                taskId: s.c.taskId,
-                version: 2,
-                configuration,
-              },
-            ],
-          }),
-        ).rejects.toThrow();
-        const invalid = structuredClone(configuration);
-        invalid.agents.reviewer.permissions = "read-write";
-        await expect(
-          s.handle.executeUpdate("approve", {
-            args: [
-              {
-                commandId: "invalid-permissions",
-                taskId: s.c.taskId,
-                version: 1,
-                configuration: invalid,
-              },
-            ],
-          }),
-        ).rejects.toThrow();
-        expect(s.calls).toEqual([]);
-        const approvedConfiguration = structuredClone(configuration);
-        approvedConfiguration.agents.implementer = agentProfile("implementer", {
-          permissions: "read-only",
-        });
-        // A saved snapshot may predate tools now present in the registry.
-        approvedConfiguration.agents.reviewer.tools = ["read", "submit_review"];
-        const approval = {
-          commandId: "approve",
-          taskId: s.c.taskId,
-          version: 1,
-          configuration: approvedConfiguration,
-        };
-        const execution = await s.handle.executeUpdate("approve", {
-          args: [approval],
-        });
-        expect(
-          await s.handle.executeUpdate("approve", { args: [approval] }),
-        ).toBe(execution);
-        const result = (await s.handle.result()) as SessionSnapshot;
-        expect(result.state).toBe("completed");
-        expect(result.acceptedResults[0]?.acceptedCommit).toBe("b".repeat(40));
-        expect(s.calls.filter((c) => c === "implement")).toHaveLength(1);
-        expect(s.calls.includes("review")).toBe(review);
-        expect(s.dispatchedConfigurations).toHaveLength(review ? 2 : 1);
-        for (const dispatched of s.dispatchedConfigurations)
-          expect(dispatched).toEqual(approvedConfiguration);
-      });
-    },
-    60_000,
-  );
-
-  it.each(["checks", "review"])(
-    "shares the repair budget for failed %s and rejects stale decisions",
-    async (failure) => {
-      const s = await scenario({
-        failChecks: failure === "checks",
-        changesRequested: failure === "review",
-      });
-      await s.worker.runUntil(async () => {
-        await s.handle.executeUpdate("conversation", {
-          args: [{ id: "message", text: "Do task" }],
-        });
-        await s.waitState("awaiting_approval");
-        await s.handle.executeUpdate("approve", {
-          args: [
-            {
-              commandId: "approve",
-              taskId: s.c.taskId,
-              version: 1,
-              configuration,
-            },
-          ],
-        });
-        const waiting = await s.waitState("waiting");
-        expect(s.calls.filter((c) => c === "implement")).toHaveLength(3);
-        const q = waiting.pendingEscalation!;
-        await expect(
-          s.handle.executeUpdate("decision", {
-            args: [
-              {
-                commandId: "stale",
-                executionId: q.executionId,
-                escalationId: "wrong",
-                answer: "retry",
-                additionalRepairs: 1,
-                confirmCriteria: [],
-              },
-            ],
-          }),
-        ).rejects.toThrow();
-        await env.sleep("2 hours");
-        expect((await s.status()).pendingEscalation?.id).toBe(q.id);
-        expect((await s.status()).pendingEscalation!.reminders).toBeGreaterThan(
-          0,
-        );
-        await s.handle.executeUpdate("cancel", { args: ["cancel"] });
-        expect(((await s.handle.result()) as SessionSnapshot).state).toBe(
-          "cancelled",
-        );
-      });
-    },
-    60_000,
-  );
-
-  it("requires explicit human confirmation and rejects partial answers", async () => {
-    const s = await scenario({ human: true });
+  it("uses separate role children per repair and completes only after delivery", async () => {
+    const s = await scenario({ findings: true });
     await s.worker.runUntil(async () => {
-      await s.handle.executeUpdate("conversation", {
-        args: [{ id: "message", text: "Do task" }],
+      const result = (await s.handle.result()) as RunRecord;
+      expect(result.execution.status).toBe("completed");
+      expect(
+        result.execution.attempts.map(
+          (a) => a.result!.implementation.sessionId,
+        ),
+      ).toEqual(["implement-0", "implement-1"]);
+      expect(
+        new Set(
+          result.execution.attempts.flatMap((a) => [
+            a.implementerWorkflowId,
+            a.reviewerWorkflowId,
+          ]),
+        ).size,
+      ).toBe(4);
+      expect(s.calls).toEqual([
+        "implement-0",
+        "review-0",
+        "implement-1",
+        "review-1",
+        "integrate-1",
+        "push",
+        "cleanup",
+      ]);
+      expect(result.execution).toMatchObject({
+        pushed: true,
+        cleaned: true,
+        repairsUsed: 1,
       });
-      await s.waitState("awaiting_approval");
-      await s.handle.executeUpdate("approve", {
-        args: [
-          {
-            commandId: "approve",
-            taskId: s.c.taskId,
-            version: 1,
-            configuration,
-          },
-        ],
-      });
-      const q = (await s.waitState("waiting")).pendingEscalation!;
-      const decision = {
-        commandId: "answer",
-        executionId: q.executionId,
-        escalationId: q.id,
-        answer: "Confirmed",
-        additionalRepairs: 0,
-        confirmCriteria: ["human"],
-      };
+      expect(result.contract).toEqual(s.input.contract);
+    });
+  });
+  it("blocks after two repairs, rejects stale decisions and requires extra budget", async () => {
+    const s = await scenario({ endless: true });
+    await s.worker.runUntil(async () => {
+      const blocked = await waitFor(
+        s.status,
+        (r) => r.execution.blocked?.kind === "repair",
+      );
+      expect(blocked.execution.attempts).toHaveLength(3);
       await expect(
-        s.handle.executeUpdate("decision", {
-          args: [{ ...decision, commandId: "partial", confirmCriteria: [] }],
+        s.handle.executeUpdate("resume", {
+          args: [
+            { commandId: "stale", blockerId: "wrong", additionalRepairs: 1 },
+          ],
         }),
       ).rejects.toThrow();
-      await s.handle.executeUpdate("decision", { args: [decision] });
-      expect(
-        ((await s.handle.result()) as SessionSnapshot).acceptedResults[0]
-          ?.humanConfirmations,
-      ).toEqual(["human"]);
-    });
-  }, 60_000);
-
-  it("shares check/review repairs and cannot use an old reply to resolve a new question", async () => {
-    const s = await scenario({ mixedFailures: true });
-    await s.worker.runUntil(async () => {
-      await s.handle.executeUpdate("conversation", {
-        args: [{ id: "goal", text: "Do task" }],
-      });
-      await s.waitState("awaiting_approval");
-      await s.handle.executeUpdate("approve", {
-        args: [
-          {
-            commandId: "approve",
-            taskId: s.c.taskId,
-            version: 1,
-            configuration,
-          },
-        ],
-      });
-      const first = (await s.waitState("waiting")).pendingEscalation!;
-      expect(s.calls.filter((c) => c === "implement")).toHaveLength(3);
-      expect(s.calls.filter((c) => c === "review")).toHaveLength(2);
-      const decision = {
+      await expect(
+        s.handle.executeUpdate("resume", {
+          args: [
+            {
+              commandId: "empty",
+              blockerId: blocked.execution.blocked!.id,
+              additionalRepairs: 0,
+            },
+          ],
+        }),
+      ).rejects.toThrow();
+      const command = {
         commandId: "continue",
-        executionId: first.executionId,
-        escalationId: first.id,
-        answer: "One extra repair",
+        blockerId: blocked.execution.blocked!.id,
         additionalRepairs: 1,
-        confirmCriteria: [],
       };
-      await s.handle.executeUpdate("decision", { args: [decision] });
-      let second = await s.waitState("waiting");
-      for (
-        let i = 0;
-        second.pendingEscalation?.id === first.id && i < 100;
-        i++
-      ) {
-        await new Promise((resolve) => setTimeout(resolve, 10));
-        second = await s.status();
-      }
-      expect(second.pendingEscalation?.id).not.toBe(first.id);
-      expect(s.calls.filter((c) => c === "implement")).toHaveLength(4);
-      await s.handle.executeUpdate("decision", { args: [decision] });
-      await env.sleep("2 hours");
-      expect((await s.status()).pendingEscalation?.id).toBe(
-        second.pendingEscalation?.id,
+      await s.handle.executeUpdate("resume", { args: [command] });
+      await s.handle.executeUpdate("resume", { args: [command] });
+      const next = await waitFor(
+        s.status,
+        (r) =>
+          r.execution.blocked?.kind === "repair" &&
+          r.execution.repairsUsed === 3,
       );
-      expect(s.calls.filter((c) => c === "implement")).toHaveLength(4);
+      expect(next.execution.attempts).toHaveLength(4);
       await s.handle.executeUpdate("cancel", { args: ["cancel"] });
-      await s.handle.result();
-    });
-  }, 60_000);
-
-  it("answers a resolved blocker using the remaining approved budget without granting extra rounds", async () => {
-    const s = await scenario({ blockedFirst: true });
-    await s.worker.runUntil(async () => {
-      await s.handle.executeUpdate("conversation", {
-        args: [{ id: "goal", text: "Do task" }],
-      });
-      await s.waitState("awaiting_approval");
-      await s.handle.executeUpdate("approve", {
-        args: [
-          {
-            commandId: "approve",
-            taskId: s.c.taskId,
-            version: 1,
-            configuration,
-          },
-        ],
-      });
-      const q = (await s.waitState("waiting")).pendingEscalation!;
-      await s.handle.executeUpdate("decision", {
-        args: [
-          {
-            commandId: "answer",
-            executionId: q.executionId,
-            escalationId: q.id,
-            answer: "Input is now available",
-            additionalRepairs: 0,
-            confirmCriteria: [],
-          },
-        ],
-      });
-      expect(((await s.handle.result()) as SessionSnapshot).state).toBe(
-        "completed",
+      expect(((await s.handle.result()) as RunRecord).execution.status).toBe(
+        "cancelled",
       );
-      expect(s.calls.filter((c) => c === "implement")).toHaveLength(2);
     });
-  }, 60_000);
-
-  it.each(["unknownEvidence", "staleReview"] as const)(
-    "cannot complete with %s",
+  });
+  it.each(["pushFailure", "cleanupFailure"] as const)(
+    "resumes %s without repeating successful agent work",
     async (failure) => {
       const s = await scenario({ [failure]: true });
       await s.worker.runUntil(async () => {
-        await s.handle.executeUpdate("conversation", {
-          args: [{ id: "goal", text: "Do task" }],
-        });
-        await s.waitState("awaiting_approval");
-        await s.handle.executeUpdate("approve", {
+        const blocked = await waitFor(
+          s.status,
+          (r) => r.execution.blocked?.kind === "delivery",
+        );
+        await s.handle.executeUpdate("resume", {
           args: [
             {
-              commandId: "approve",
-              taskId: s.c.taskId,
-              version: 1,
-              configuration,
+              commandId: "resume",
+              blockerId: blocked.execution.blocked!.id,
+              additionalRepairs: 0,
             },
           ],
         });
-        const waiting = await s.waitState("waiting");
-        expect(waiting.acceptedResults).toEqual([]);
-        expect(waiting.pendingEscalation?.kind).toBe("recovery");
-        expect(s.calls).not.toContain("accept");
+        expect(((await s.handle.result()) as RunRecord).execution.status).toBe(
+          "completed",
+        );
+        expect(s.calls.filter((c) => c.startsWith("implement"))).toHaveLength(
+          1,
+        );
+        expect(s.calls.filter((c) => c.startsWith("review"))).toHaveLength(1);
+      });
+    },
+  );
+  it.each(["baseChanged", "stale"] as const)(
+    "does not deliver with %s",
+    async (failure) => {
+      const s = await scenario({ [failure]: true });
+      await s.worker.runUntil(async () => {
+        const blocked = await waitFor(
+          s.status,
+          (r) => r.execution.status === "blocked",
+        );
+        if (failure === "baseChanged")
+          await expect(
+            s.handle.executeUpdate("resume", {
+              args: [
+                {
+                  commandId: "resume",
+                  blockerId: blocked.execution.blocked!.id,
+                  additionalRepairs: 1,
+                },
+              ],
+            }),
+          ).rejects.toThrow();
+        expect(s.calls).not.toContain("push");
         await s.handle.executeUpdate("cancel", { args: ["cancel"] });
         await s.handle.result();
       });
     },
-    60_000,
   );
+  it.each(["failedChecks", "integrationFailure"] as const)(
+    "repairs %s inside the same budget",
+    async (failure) => {
+      const s = await scenario({ [failure]: true });
+      await s.worker.runUntil(async () => {
+        const result = (await s.handle.result()) as RunRecord;
+        expect(result.execution.repairsUsed).toBe(1);
+        if (failure === "failedChecks")
+          expect(s.calls).not.toContain("review-0");
+        expect(s.calls).toContain("review-1");
+      });
+    },
+  );
+  it("waits for an active child to stop on cancellation", async () => {
+    const s = await scenario({ longImplement: true });
+    await s.worker.runUntil(async () => {
+      for (let i = 0; i < 300 && !s.calls.includes("implement-0"); i++)
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(s.calls).toContain("implement-0");
+      await s.handle.executeUpdate("cancel", { args: ["cancel"] });
+      expect(((await s.handle.result()) as RunRecord).execution.status).toBe(
+        "cancelled",
+      );
+      expect(s.calls).toContain("implement-stopped");
+      expect(s.calls).not.toContain("push");
+    });
+  });
+  it("resumes final artifact persistence without losing completed status", async () => {
+    const s = await scenario({ finalRecordFailure: true });
+    await s.worker.runUntil(async () => {
+      const blocked = await waitFor(
+        s.status,
+        (r) => r.execution.blocked?.kind === "recovery" && r.execution.cleaned,
+      );
+      await s.handle.executeUpdate("resume", {
+        args: [
+          {
+            commandId: "resume",
+            blockerId: blocked.execution.blocked!.id,
+            additionalRepairs: 0,
+          },
+        ],
+      });
+      expect(((await s.handle.result()) as RunRecord).execution.status).toBe(
+        "completed",
+      );
+      expect(s.calls.filter((c) => c === "push")).toHaveLength(1);
+    });
+  });
+  it("runs real Git, Pi adapters, fix sessions, integration, push and cleanup end to end", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "claith-e2e-"));
+    try {
+      const f = await projectFixture(directory);
+      f.input.runId = randomUUID();
+      const sessions: string[] = [];
+      const worker = await Worker.create({
+        connection: env.nativeConnection,
+        taskQueue: f.input.runId,
+        workflowBundle: bundle,
+        activities: createActivities(f.root, fixtureFactory(sessions, true)),
+      });
+      const client = new DeliveryClient(env.client, f.input.runId);
+      const runId = await client.run(
+        f.project,
+        f.input.contract,
+        f.input.configuration,
+      );
+      const handle = env.client.workflow.getHandle(runId);
+      await worker.runUntil(async () => {
+        const result = (await handle.result()) as RunRecord;
+        expect(result.execution.status).toBe("completed");
+        expect(new Set(sessions).size).toBe(4);
+        expect(result.execution.sessions).toHaveLength(4);
+        expect(
+          await client.run(f.project, f.input.contract, f.input.configuration),
+        ).toBe(runId);
+        await expect(
+          client.run(
+            f.project,
+            { ...f.input.contract, title: "Different" },
+            f.input.configuration,
+          ),
+        ).rejects.toThrow("different input");
+        expect(result.execution.attempts).toHaveLength(2);
+        expect(await git(f.remote, "rev-parse", "dev")).toBe(
+          result.execution.integration!.revision,
+        );
+        expect(
+          await git(
+            f.project,
+            "branch",
+            "--list",
+            result.execution.workspace!.branch,
+          ),
+        ).toBe("");
+        const saved = await readJson<RunRecord>(
+          join(result.execution.workspace!.artifactDir, "run.json"),
+        );
+        expect(saved?.contract).toEqual(f.input.contract);
+        expect(saved?.execution.cleaned).toBe(true);
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 60000);
 });

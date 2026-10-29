@@ -2,6 +2,9 @@ import { z } from "zod";
 import type { ExecutionConfiguration } from "../configuration.js";
 
 export const identity = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/);
+export const runIdentity = z
+  .string()
+  .regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,199}$/);
 export const revision = z.string().regex(/^[a-f0-9]{40,64}$/);
 export const commandSchema = z.strictObject({
   id: identity,
@@ -9,70 +12,60 @@ export const commandSchema = z.strictObject({
 });
 export const criterionSchema = z.strictObject({
   id: identity,
-  text: z.string().min(1),
-  mode: z.enum(["check", "review", "human"]),
+  text: z.string().trim().min(1),
+  mode: z.enum(["check", "review"]),
   checkId: identity.nullable(),
 });
 export const contractSchema = z
   .strictObject({
     taskId: identity,
     version: z.number().int().positive(),
-    startingRevision: revision,
-    title: z.string().min(1),
-    outcome: z.string().min(1),
-    boundaries: z.array(z.string().min(1)).min(1),
-    dependencies: z.array(identity),
-    acceptance: z.array(criterionSchema).min(1),
-    setup: z.array(commandSchema),
+    startCommit: revision,
+    title: z.string().trim().min(1),
+    tasks: z.string().min(1),
+    goal: z.string().trim().min(1),
+    context: z.string(),
+    scope: z.string(),
+    constraints: z.string(),
+    acceptanceCriteria: z.array(criterionSchema).min(1),
+    setup: z.array(commandSchema).default([]),
     checks: z.array(commandSchema).min(1),
-    review: z.boolean(),
-    endpoint: z.literal("local-commit"),
   })
   .superRefine((c, ctx) => {
-    for (const [name, ids] of [
-      ["acceptance", c.acceptance.map((a) => a.id)],
-      ["commands", [...c.setup, ...c.checks].map((a) => a.id)],
-    ] as const) {
+    for (const ids of [
+      c.acceptanceCriteria.map((a) => a.id),
+      [...c.setup, ...c.checks].map((a) => a.id),
+    ]) {
       if (new Set(ids).size !== ids.length)
-        ctx.addIssue({ code: "custom", message: `Duplicate ${name} IDs` });
-    }
-    if (
-      new Set(c.dependencies).size !== c.dependencies.length ||
-      c.dependencies.includes(c.taskId)
-    ) {
-      ctx.addIssue({
-        code: "custom",
-        message: "Dependencies must be unique predecessors",
-      });
-    }
-    for (const a of c.acceptance) {
-      if (
-        (a.mode === "check" && !c.checks.some((ch) => ch.id === a.checkId)) ||
-        (a.mode !== "check" && a.checkId !== null) ||
-        (a.mode === "review" && !c.review)
-      ) {
         ctx.addIssue({
           code: "custom",
-          message: `Invalid evidence requirement for ${a.id}`,
+          message: "Duplicate criterion or command IDs",
         });
-      }
+    }
+    for (const a of c.acceptanceCriteria) {
+      if (
+        a.mode === "check"
+          ? !c.checks.some((ch) => ch.id === a.checkId)
+          : a.checkId !== null
+      )
+        ctx.addIssue({
+          code: "custom",
+          message: `Invalid verification for ${a.id}`,
+        });
     }
   });
-export type DeliveryContract = z.infer<typeof contractSchema>;
-export interface Conversation {
-  id: string;
-  text: string;
+export type TaskContract = z.infer<typeof contractSchema>;
+export interface RunInput {
+  runId: string;
+  project: string;
+  contract: TaskContract;
+  configuration: ExecutionConfiguration;
 }
-export interface OutlineTask {
-  taskId: string;
-  title: string;
-  dependencies: string[];
-}
-export interface Proposal {
-  message: string;
-  outline: OutlineTask[];
-  contract: DeliveryContract | null;
-  goalComplete: boolean;
+export interface Workspace {
+  path: string;
+  branch: string;
+  base: string;
+  artifactDir: string;
 }
 export interface CommandEvidence {
   id: string;
@@ -82,127 +75,206 @@ export interface CommandEvidence {
   revision: string;
   unchanged: boolean;
 }
-export interface Workspace {
-  path: string;
-  branch: string;
-  base: string;
-  artifactDir: string;
-}
-export interface Implementation {
-  status: "submitted" | "blocked";
-  summary: string;
-  evidence: { criterionId: string; references: string[] }[];
-}
-export interface Review {
-  taskId: string;
-  attempt: number;
-  revision: string;
-  verdict: "accepted" | "changes_requested" | "blocked";
-  summary: string;
-  evidenceRefs: string[];
+const submissionIdentity = z.strictObject({
+  runId: runIdentity,
+  taskId: identity,
+  version: z.number().int().positive(),
+  attempt: z.number().int().nonnegative(),
+  revision,
+});
+export const implementationSchema = submissionIdentity.extend({
+  status: z.enum(["submitted", "blocked"]),
+  summary: z.string().min(1),
+  evidence: z.array(
+    z.strictObject({
+      criterionId: identity,
+      references: z.array(z.string().min(1)),
+    }),
+  ),
+});
+export const reviewSchema = submissionIdentity.extend({
+  verdict: z.enum(["accepted", "changes_requested", "blocked"]),
+  summary: z.string().min(1),
+  findings: z.array(z.strictObject({ id: identity, text: z.string().min(1) })),
+  criteria: z.array(
+    z.strictObject({
+      criterionId: identity,
+      satisfied: z.boolean(),
+      references: z.array(z.string().min(1)),
+    }),
+  ),
+});
+export type Implementation = z.infer<typeof implementationSchema>;
+export type Review = z.infer<typeof reviewSchema>;
+export interface AgentResult<T> {
+  sessionId: string;
+  submission: T;
 }
 export interface Candidate {
   revision: string;
   diffRef: string;
-  implementation: Implementation;
 }
-export interface TaskResult {
-  taskId: string;
-  executionId: string;
-  acceptedCommit: string;
+export interface AttemptInput extends RunInput {
   workspace: Workspace;
-  checks: CommandEvidence[];
-  review: Review | null;
-  evidence: Implementation["evidence"];
-  humanConfirmations: string[];
-  blockers: string[];
-}
-export interface Escalation {
-  id: string;
-  executionId: string;
-  kind: "repair" | "blocker" | "recovery" | "acceptance";
-  question: string;
-  criteria: string[];
-  reminders: number;
-}
-export type SessionState =
-  | "idle"
-  | "planning"
-  | "awaiting_approval"
-  | "running"
-  | "waiting"
-  | "completed"
-  | "cancelled";
-export interface TaskSnapshot {
-  executionId: string;
-  contract: DeliveryContract;
-  attempt: number;
-  repairsUsed: number;
-  state: "running" | "waiting" | "completed" | "cancelled";
-}
-export interface SessionSnapshot {
-  sessionId: string;
-  project: string;
-  state: SessionState;
-  currentTask: TaskSnapshot | null;
-  pendingEscalation: Escalation | null;
-  proposal: Proposal | null;
-  outline: OutlineTask[];
-  acceptedResults: TaskResult[];
-  conversation: Conversation[];
-  messages: string[];
-}
-export interface SessionInput {
-  sessionId: string;
-  project: string;
-  startingRevision: string;
-  configuration: ExecutionConfiguration;
-}
-export interface Approval {
-  commandId: string;
-  taskId: string;
-  version: number;
-  configuration: ExecutionConfiguration;
-}
-export interface Decision {
-  commandId: string;
-  executionId: string;
-  escalationId: string;
-  answer: string;
-  additionalRepairs: number;
-  confirmCriteria: string[];
-}
-export interface TaskInput {
-  sessionId: string;
-  project: string;
-  executionId: string;
-  coordinatorId: string;
-  contract: DeliveryContract;
-  configuration: ExecutionConfiguration;
-  dependencies: TaskResult[];
-}
-export interface AttemptInput extends TaskInput {
   attempt: number;
   feedback: string;
+}
+export interface ReviewInput extends AttemptInput {
+  candidate: Candidate;
+  checks: CommandEvidence[];
+}
+export interface ImplementerResult {
+  implementation: AgentResult<Implementation>;
+  candidate: Candidate | null;
+  checks: CommandEvidence[];
+}
+export interface AttemptRecord {
+  attempt: number;
+  implementerWorkflowId: string;
+  reviewerWorkflowId: string | null;
+  result: ImplementerResult | null;
+  review: AgentResult<Review> | null;
+  integration: Integration | null;
+}
+export interface Integration {
+  revision: string;
+  path: string;
+  branch: string;
+  checks: CommandEvidence[];
+}
+export type Stage =
+  | "prepare"
+  | "setup"
+  | "implement"
+  | "review"
+  | "integrate"
+  | "push"
+  | "cleanup"
+  | "done";
+export type BlockKind =
+  "base_changed" | "repair" | "agent" | "recovery" | "delivery";
+export interface SessionReference {
+  role: "implementer" | "reviewer";
+  attempt: number;
+  sessionId: string;
+  path: string;
+}
+export interface RunRecord {
+  contract: TaskContract;
+  execution: {
+    runId: string;
+    project: string;
+    configuration: ExecutionConfiguration;
+    status: "running" | "blocked" | "completed" | "cancelled";
+    stage: Stage;
+    repairsUsed: number;
+    repairBudget: number;
+    blocked: { id: string; kind: BlockKind; message: string } | null;
+    workspace: Workspace | null;
+    sessions: SessionReference[];
+    attempts: AttemptRecord[];
+    integration: Integration | null;
+    pushed: boolean;
+    cleaned: boolean;
+  };
+}
+export interface Resume {
+  commandId: string;
+  blockerId: string;
+  additionalRepairs: number;
+}
+export interface WorkInput extends RunInput {
   workspace: Workspace;
 }
-export interface PlanInput {
-  session: SessionSnapshot;
-  startingRevision: string;
-  configuration: ExecutionConfiguration;
+export interface DeliveryInput extends ReviewInput {
+  review: AgentResult<Review>;
+}
+export interface IntegrationInput extends RunInput {
+  workspace: Workspace;
+  integration: Integration;
 }
 export interface Activities {
-  plan(input: PlanInput): Promise<Proposal>;
-  prepare(input: TaskInput): Promise<Workspace>;
-  implement(input: AttemptInput): Promise<Implementation>;
-  candidate(
-    input: AttemptInput & { implementation: Implementation },
-  ): Promise<Candidate>;
-  check(
-    input: AttemptInput & { candidate: Candidate },
-  ): Promise<CommandEvidence[]>;
-  review(
-    input: AttemptInput & { candidate: Candidate; checks: CommandEvidence[] },
-  ): Promise<Review>;
-  accept(input: AttemptInput & { result: TaskResult }): Promise<void>;
+  prepare(input: RunInput): Promise<Workspace>;
+  setup(input: WorkInput): Promise<void>;
+  implement(input: AttemptInput): Promise<AgentResult<Implementation>>;
+  candidate(input: AttemptInput): Promise<Candidate>;
+  check(input: ReviewInput): Promise<CommandEvidence[]>;
+  review(input: ReviewInput): Promise<AgentResult<Review>>;
+  integrate(input: DeliveryInput): Promise<Integration>;
+  push(input: IntegrationInput): Promise<void>;
+  cleanup(input: IntegrationInput): Promise<void>;
+  record(input: RunRecord): Promise<SessionReference[]>;
+}
+export function checksPassed(
+  contract: TaskContract,
+  checks: CommandEvidence[],
+  commit: string,
+): boolean {
+  return (
+    checks.length === contract.checks.length &&
+    contract.checks.every((c) =>
+      checks.some(
+        (e) =>
+          e.id === c.id &&
+          e.command === c.command &&
+          e.exitCode === 0 &&
+          e.unchanged &&
+          e.revision === commit,
+      ),
+    )
+  );
+}
+export function assertSubmission(
+  input: AttemptInput,
+  value: Implementation | Review,
+  commit: string,
+): void {
+  if (
+    value.runId !== input.runId ||
+    value.taskId !== input.contract.taskId ||
+    value.version !== input.contract.version ||
+    value.attempt !== input.attempt ||
+    value.revision !== commit
+  )
+    throw new Error("Stale or mismatched submission");
+}
+export function assertReview(input: ReviewInput, review: Review): void {
+  assertSubmission(input, review, input.candidate.revision);
+  const ids = review.criteria.map((c) => c.criterionId);
+  if (
+    new Set(ids).size !== ids.length ||
+    review.criteria.some(
+      (c) =>
+        !input.contract.acceptanceCriteria.some((a) => a.id === c.criterionId),
+    )
+  )
+    throw new Error("Unknown or duplicate review criteria");
+  if (new Set(review.findings.map((f) => f.id)).size !== review.findings.length)
+    throw new Error("Duplicate findings");
+  for (const c of review.criteria) {
+    if (
+      c.references.some(
+        (ref) => ref !== "diff" && !input.checks.some((ch) => ch.id === ref),
+      )
+    )
+      throw new Error("Unknown evidence reference");
+  }
+  if (
+    review.verdict === "accepted" &&
+    (review.findings.length ||
+      !checksPassed(input.contract, input.checks, input.candidate.revision) ||
+      input.contract.acceptanceCriteria.some(
+        (a) =>
+          !review.criteria.some(
+            (c) =>
+              c.criterionId === a.id &&
+              c.satisfied &&
+              c.references.length &&
+              (a.mode !== "check" || c.references.includes(a.checkId!)),
+          ),
+      ))
+  )
+    throw new Error(
+      "Acceptance requires all criteria, passing checks and no findings",
+    );
 }

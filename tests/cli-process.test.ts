@@ -1,106 +1,84 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { initializeConfiguration } from "../src/configuration.js";
-import type { SessionSnapshot } from "../src/domain/contracts.js";
-
+import { taskInput } from "./fixtures/task.js";
 const doubles = vi.hoisted(() => ({
-  commands: [] as string[],
   client: {
-    create: vi.fn(),
+    run: vi.fn(),
     status: vi.fn(),
-    close: vi.fn(),
+    resume: vi.fn(),
     cancel: vi.fn(),
-    conversation: vi.fn(),
-    approve: vi.fn(),
-    answer: vi.fn(),
+    close: vi.fn(),
   },
+  connect: vi.fn(),
 }));
 vi.mock("../src/runtime/client.js", () => ({
-  DeliveryClient: { connect: async () => doubles.client },
-}));
-vi.mock("node:readline/promises", () => ({
-  createInterface: () => ({
-    close: () => {},
-    async *[Symbol.asyncIterator]() {
-      for (const command of doubles.commands) yield command;
-    },
-  }),
+  DeliveryClient: { connect: doubles.connect },
 }));
 import { runCli } from "../src/cli/index.js";
-
 let root: string;
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), "claith-cli-"));
   await initializeConfiguration(root);
-  for (const role of ["orchestrator", "implementer", "reviewer"]) {
+  for (const role of ["orchestrator", "implementer", "reviewer"])
     await writeFile(
       join(root, "agents", `${role}.toml`),
       `provider = "double"\nmodel = "double"\ninstructions = "test"\npermissions = "${role === "implementer" ? "read-write" : "read-only"}"\n`,
     );
-  }
   vi.clearAllMocks();
+  doubles.connect.mockResolvedValue(doubles.client);
 });
 afterEach(async () => {
   vi.restoreAllMocks();
   await rm(root, { recursive: true, force: true });
 });
-
-describe("CLI composition", () => {
-  it("reconnects to the same pending question and quits without cancelling", async () => {
-    const snapshot: SessionSnapshot = {
-      sessionId: "session",
-      project: root,
-      state: "waiting",
-      currentTask: null,
-      pendingEscalation: {
-        id: "same-question",
-        executionId: "execution",
-        kind: "repair",
-        question: "Continue?",
-        criteria: [],
-        reminders: 0,
-      },
-      proposal: null,
-      outline: [],
-      acceptedResults: [],
-      conversation: [],
-      messages: [],
-    };
-    doubles.client.status.mockResolvedValue(snapshot);
-    doubles.commands = ["/status", "/quit"];
+describe("direct task CLI", () => {
+  it("submits a JSON contract directly and closes the client", async () => {
+    const input = taskInput();
+    await writeFile(join(root, "task.json"), JSON.stringify(input.contract));
+    doubles.client.run.mockResolvedValue("run-1");
     const output = vi.spyOn(console, "log").mockImplementation(() => {});
-    await runCli(["chat", "--project", root, "--session", "session"], root);
-    await runCli(["chat", "--project", root, "--session", "session"], root);
-    expect(doubles.client.create).not.toHaveBeenCalled();
-    expect(doubles.client.cancel).not.toHaveBeenCalled();
-    expect(doubles.client.close).toHaveBeenCalledTimes(2);
-    expect(output.mock.calls.flat().join("\n")).toContain("same-question");
+    await runCli(
+      ["run", "--project", root, "--contract", join(root, "task.json")],
+      root,
+    );
+    expect(doubles.client.run).toHaveBeenCalledWith(
+      root,
+      input.contract,
+      expect.anything(),
+    );
+    expect(output).toHaveBeenCalledWith("run-1");
+    expect(doubles.client.close).toHaveBeenCalledOnce();
   });
-
-  it("checks the project binding before opening a resumed conversation", async () => {
-    doubles.client.status.mockResolvedValue({ project: "/another-project" });
-    await expect(
-      runCli(["chat", "--project", root, "--session", "session"], root),
-    ).rejects.toThrow("another project");
-    expect(doubles.client.close).toHaveBeenCalledTimes(1);
-  });
-
-  it("rejects unknown development entrypoint commands with stderr and a failing exit", async () => {
-    const exec = promisify(execFile);
-    await expect(
-      exec(
-        process.execPath,
-        ["--import", "tsx", "src/main.ts", "unknown-command"],
-        { timeout: 10_000 },
-      ),
-    ).rejects.toMatchObject({
-      code: 1,
-      stdout: "",
-      stderr: expect.stringContaining("Unknown command"),
+  it("prints status as JSON and passes explicit extra repair authority", async () => {
+    doubles.client.status.mockResolvedValue({
+      execution: { status: "blocked" },
     });
+    const output = vi.spyOn(console, "log").mockImplementation(() => {});
+    await runCli(["status", "--run", "run-1"], root);
+    expect(
+      JSON.parse(output.mock.calls[0]![0] as string).execution.status,
+    ).toBe("blocked");
+    await runCli(
+      ["resume", "--run", "run-1", "--additional-repairs", "2"],
+      root,
+    );
+    expect(doubles.client.resume).toHaveBeenCalledWith("run-1", 2);
+    await runCli(["cancel", "--run", "run-1"], root);
+    expect(doubles.client.cancel).toHaveBeenCalledWith("run-1");
   });
+  it.each([
+    ["chat"],
+    ["status"],
+    ["resume", "--run", "run-1", "--additional-repairs", "-1"],
+    ["run", "--run", "run-1"],
+  ])(
+    "rejects obsolete or invalid arguments %j before connecting",
+    async (...args) => {
+      await expect(runCli(args, root)).rejects.toThrow();
+      expect(doubles.connect).not.toHaveBeenCalled();
+    },
+  );
 });
