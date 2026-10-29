@@ -1,34 +1,43 @@
 ---
 title: Project Goal
 created: 2026-10-22
-updated: 2026-10-27
+updated: 2026-10-29
 tags: [project]
 sources: []
 ---
 
 # Project Goal
 
-Claith is a self-hosted agentic development environment for solo developers that turns a human-approved Delivery Contract into a completed, evidence-backed software outcome with minimal developer attention. A Delivery Contract defines the desired outcome, boundaries, acceptance criteria, and delivery endpoint. Claith drafts the contract from the developer's intent, and execution begins after human approval.
+Claith is a self-hosted agentic development environment for solo developers that turns a human-approved target state into a completed, evidence-backed software outcome with minimal developer attention. The delivery unit is a phase: a bounded outcome described through observable behavior, fixed acceptance criteria, boundaries, and an authorized delivery endpoint. Its approved specification is the Delivery Contract.
 
-For each approved contract, Claith decomposes the work, selects the required agent capabilities, and adapts the execution plan within an opinionated delivery lifecycle. Depending on the contract, delivery can include code, tests, infrastructure, CI/CD, release, and publishing. A contract is complete only when every acceptance criterion is supported by evidence or explicit human confirmation and its delivery endpoint has been reached.
+The same model can cover a small task, a feature, or a phase within a larger epic. Large goals are divided into phases that each deliver a useful, verifiable state. Product direction and milestones are agreed with the developer; Claith does not need a detailed implementation plan for the entire product before work begins.
 
-Each runtime operates independently, durably, and recoverably across multiple projects and concurrent contracts. A separate UI can connect to and control multiple runtime instances, while each runtime remains authoritative for its execution and state. Humans retain ownership of product direction and contract changes; Claith requests their attention only for product judgment, material risk, irreversible action, or missing authority. Claith can learn from completed runs by proposing versioned improvements for future work, but those improvements require approval and never alter an active contract.
+The developer approves the phase, not its individual tasks. A planner examines the actual project state and plans the next meaningful behavior increment, including its tasks and dependencies. After implementation, verification, review, and integration, the planner examines the resulting code and evidence before selecting the next increment. It may adapt the technical plan within the approved contract without requesting routine intermediate approvals.
+
+The runtime executes a defined delivery lifecycle and enforces dependencies, tool permissions, checks, evidence, and bounded repair policies. Normal development starts from the current `dev`, uses isolated working branches, and returns verified changes to `dev`, followed by a push. Promotion to `main` and publishing are explicit milestone delivery actions requiring the authority recorded in the contract; they do not happen after every task or automatically after every phase.
+
+A phase becomes ready for acceptance when the integrated result demonstrates its agreed behavior and acceptance criteria. The developer reviews that result and may request corrections. Claith plans and executes those corrections, repeating verification and review. A phase closes only after human acceptance and fulfillment of the agreed delivery endpoint. It then stays finished and idle until the developer discusses and approves another phase. The planner cannot create additional work simply to keep running.
+
+Each runtime remains independently operable, durable, and recoverable across projects and concurrent phase runs, with shared repository writes coordinated. A separate UI can connect to multiple runtimes, while each runtime owns its execution and state. Normal human contact is phase definition/approval and final acceptance; earlier intervention is reserved for blockers that cannot be resolved within granted authority, missing inputs, or required contract changes. Silence never grants approval.
 
 ## Decision Guidance
 
-- Optimize for reducing developer attention while preserving reliable, evidence-backed outcomes.
-- Prefer an opinionated delivery lifecycle with dynamic capability and agent selection over a general workflow builder.
-- Allow execution plans, tasks, ordering, agents, and strategies to adapt within the boundaries of an approved contract.
-- Keep runtimes self-hosted, independently operable, durable, and recoverable; treat the UI as a control surface rather than the owner of execution state.
-- Keep product direction and contract changes human-owned, and apply approved learning improvements only to future work.
-- Make material deviations from this goal explicit. Current requester instructions remain authoritative when they conflict with this direction.
+- Optimize for finishing useful behavior with evidence and little developer attention.
+- Keep the phase contract stable; version the evolving task plan separately.
+- Use a planner for reasoning and a deterministic runtime for execution control. A separate AI orchestration layer is not required for the initial product.
+- Keep quality gates fixed while allowing tasks, dependencies, and technical approaches to adapt within approved boundaries.
+- Evaluate the integrated behavior against the original phase criteria, not merely the completion of individual tasks.
+- Keep product scope, acceptance-criteria changes, publication authority, and final acceptance human-owned.
+- Apply any future approved learning improvements to subsequent work; never silently change an active contract.
+- Make material deviations explicit. Current requester instructions remain authoritative.
 
 ## Current Non-Goals
 
-- A general-purpose loop builder or marketplace is not part of the current product core.
-- Product roadmap and prioritization remain human responsibilities.
-- Active Delivery Contracts change only through explicit human approval.
+- A generic workflow builder, arbitrary agent hierarchy, or marketplace.
+- Autonomous product-roadmap changes or automatic progression into an unapproved next phase.
+- Treating task completion, passing commands, or a planner's completion statement as sufficient human acceptance.
+- Assuming that a goal description grants capabilities or external permissions that the runtime does not implement.
 
-## Architecture and First Delivery Slice
+## Architecture and Delivery Status
 
-The accepted runtime direction is recorded in [[architecture_delivery-runtime]], with selected tools and current implementation status in [[architecture_tooling]]. The first delivery slice and its acceptance evidence are defined in [[project_phase-one]]. These pages distinguish the intended delivery runtime from the current TypeScript scaffold and local development service.
+[[architecture_delivery-runtime]] defines the agreed phase lifecycle, planning boundary, storage responsibilities, and Git delivery rules. [[architecture_tooling]] records the implemented tools and the remaining selections. [[project_phase-one]] distinguishes the existing task-based delivery baseline from the next phase-based delivery slice. [[project_repository-structure]] maps the current implementation.

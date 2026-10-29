@@ -46,3 +46,13 @@ Last changed by: Codex
 - Added research metadata, tag registration, domain navigation, and internal wikilinks; removed the obsolete `docs/` entry from the repository index.
 
 Last changed by: Codex
+
+## [2026-10-29] update | phase contracts, rolling planning, and implementation alignment
+
+- Updated [[project_goal]] around human-approved phases with observable behavior, fixed criteria, autonomous task execution, final acceptance/corrections, and an explicit stop before the next phase.
+- Replaced the general dynamic-runner/AI-orchestrator direction in [[architecture_delivery-runtime]] with a planner, deterministic quality gates, evolving task plans, `dev` integration/push, and explicitly authorized milestone promotion/publication on `main`.
+- Distinguished proposed application SQLite persistence from Temporal execution authority and its service database; left schema/driver and publishing details as implementation work.
+- Corrected obsolete scaffold-only descriptions in [[architecture_tooling]] and [[project_repository-structure]], including `config.toml`, permission profiles/registry, five custom tools, seven activities, task-contract fields, and current verification limits.
+- Revised [[project_phase-one]] and navigation to separate the implemented task baseline and its recorded evidence from the next phase-delivery slice. Historical research and existing evidence were preserved.
+
+Last changed by: Codex

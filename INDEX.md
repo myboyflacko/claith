@@ -26,5 +26,5 @@
 | `docker-compose.yml`                      | Persistent local Temporal development API and Web UI                                     |
 | `wiki/index.md`                           | Durable project knowledge entrypoint                                                     |
 | `wiki/architecture/ARCHITECTURE_INDEX.md` | Accepted runtime direction and selected tools                                            |
-| `wiki/project/project_phase-one.md`       | First delivery slice and scope                                                           |
+| `wiki/project/project_phase-one.md`       | Phase-delivery target and baseline evidence                                                           |
 | `wiki/research/RESEARCH_INDEX.md`         | Historical research and source references                                                |

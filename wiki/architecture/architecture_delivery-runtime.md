@@ -1,98 +1,101 @@
 ---
 title: Delivery Runtime Architecture
 created: 2026-10-27
-updated: 2026-10-27
+updated: 2026-10-29
 tags: [architecture]
 sources:
   - "[[project_goal]]"
-  - https://docs.temporal.io/evaluate/understanding-temporal
+  - https://docs.temporal.io/encyclopedia/event-history
   - https://docs.temporal.io/develop/typescript/workflows/message-passing
-  - https://docs.temporal.io/develop/typescript/workflows/timers
-  - https://docs.temporal.io/develop/typescript/workflows/continue-as-new
-  - https://docs.temporal.io/develop/typescript/workflows/versioning
-  - https://docs.temporal.io/activity-definition
-  - https://pi.dev/docs/latest/sdk
+  - https://www.sqlite.org/whentouse.html
 ---
 
 # Delivery Runtime Architecture
 
-## Decision and implementation status
+## Direction and current implementation
 
-Claith selects Temporal for durable workflow orchestration and the Pi SDK for agent execution. The target application runtime and workers use TypeScript on Node.js so they can embed Pi directly. The repository currently provides a TypeScript scaffold and a persistent Temporal CLI development service. The legacy Python/LangGraph/Codex implementation has been removed; application workflows, workers, and Pi execution remain to be implemented and validated in [[project_phase-one]].
+The accepted direction is a human-approved phase contract, rolling behavior planning, and a deterministic delivery runtime. Temporal owns durable execution, and Pi runs the planner, implementer, and reviewer inside activities. TypeScript on Node.js 24 remains the application stack. This serves [[project_goal]].
 
-This design serves [[project_goal]]: a self-hosted runtime turns an approved Delivery Contract into an evidence-backed outcome. Trading systems are a separate topic and are outside Claith's scope.
+The repository already implements a task-based Temporal/Pi loop with approval, worktrees, candidate commits, checks, optional review, bounded repairs, human questions, cancellation, and recovery. It is no longer an empty scaffold. That loop is the baseline for the phase model, not an implementation of phase approval or final phase acceptance. Code and configuration are authoritative; [[architecture_tooling]] lists the current interfaces and [[project_phase-one]] describes the remaining delivery slice.
 
-Temporal is selected because task dispatch, durable timers, retries, and recovery belong to one execution runtime. LangGraph can also express dynamic plans and persistent agent workflows; the decision is about coordinating these operational responsibilities, not a demonstrated performance advantage. Claith accepts the additional Temporal deployment and workflow-versioning responsibilities.
+## Domain language and ownership
 
-## Language and ownership
+| Term               | Meaning and owner                                                                                                                                                                                              |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Phase              | The bounded target state the developer authorizes Claith to reach. Its size may correspond to a small task, a feature, or part of an epic.                                                                     |
+| Delivery Contract  | The approved phase outcome, fixed acceptance criteria, boundaries, delivery endpoint, and authority. It comes from the developer's intent; tasks are derived from it. Material changes require human approval. |
+| Behavior increment | The next useful, observable improvement toward the phase target. It is selected using the actual code and evidence left by earlier work.                                                                       |
+| Task plan          | A versioned decomposition of the next increment into tasks and dependencies. It can evolve inside the contract without individual human task approvals.                                                        |
+| Task               | An executable unit contributing to contract criteria, with clear inputs, dependencies, expected result, and verification. A completed task does not by itself complete the phase.                              |
+| Delivery Run       | An execution of an approved contract version, with a stable Claith identity distinct from Temporal's own Run ID.                                                                                               |
+| Attempt            | A bounded execution or repair attempt for a task or delivery step.                                                                                                                                             |
+| Escalation         | A recorded request for missing input, authority, reconciliation, or a contract decision that the runtime cannot resolve on its own.                                                                            |
 
-| Term | Meaning and owner |
-| --- | --- |
-| Delivery Contract | Human-approved outcome, boundaries, acceptance criteria, and delivery endpoint. Contract changes require human approval. |
-| Execution Plan | Versioned selection of steps, dependencies, and bounded repair policies for one contract. Claith may adapt it within approved boundaries. |
-| Delivery Run | One execution of a particular approved contract version, identified by project and a stable Claith run ID. |
-| Step | A planned unit of work requiring a registered capability and defined inputs and completion conditions. |
-| Attempt | One execution attempt of a step. Technical retries and review-driven repair rounds are tracked separately. |
-| Escalation | A recorded blocker or decision request with an ID, reason, allowed responses, and optional deadline. |
+The planner is the developer's reasoning partner for goals and phases. It creates executable tasks and later evaluates the changed system to plan the next increment. It does not write the implementation or own the scheduler. The currently named `orchestrator` Pi role performs planning; a separate AI orchestrator is not required by the target architecture.
 
-The main AI orchestrator is the developer's contact across projects. Project or team planning sessions scope their context to the relevant project and produce contracts and plans. These are logical agent roles activated when needed. The Temporal workflow is application code that executes the approved plan; it is not the AI planner.
+| Component         | Responsibility                                                                                                                                       |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Planner           | Clarify behavior and criteria, draft the phase contract, plan the next increment, and propose technical replanning or tasks for human feedback.      |
+| Temporal workflow | Own execution progress, select eligible tasks, enforce the lifecycle and authority, validate results, and manage repairs, waiting, and cancellation. |
+| Activity worker   | Run agents or deterministic operations and validate/reconcile their external effects.                                                                |
+| Implementer       | Implement the assigned task within its approved phase context and submit structured evidence or a blocker.                                           |
+| Reviewer          | Independently assess a specific candidate and, at phase completion, the integrated behavior against the phase contract.                              |
+| Control client/UI | Present plans, evidence, progress, blockers, and results; submit phase approvals, feedback, acceptance, and cancellation.                            |
 
-| Component | Responsibility |
-| --- | --- |
-| Orchestrator | Draft contracts and plans, explain progress, and route questions to an authorized agent or human. |
-| Temporal workflow | Own a run's execution state, choose the next eligible step, evaluate results, and manage bounded repairs and escalation. |
-| Activity worker | Execute registered agent or deterministic capabilities, validate their outputs, and reconcile uncertain external effects before repeating work. |
-| Pi SDK | Provide model access, role sessions, tools, and agent lifecycle events inside activities. |
-| API and UI | Authenticate commands, enforce authority, submit decisions, and present state, chats, and evidence. The UI is a control surface. |
+## Phase lifecycle and rolling planning
 
-The control UI supports planning and resolving problems without requiring a code editor. Agents receive relevant project wiki context; global access by the orchestrator does not imply loading every wiki into every session.
+1. The developer and planner establish a target state, fixed criteria, boundaries, and delivery endpoint. The phase contract is explicitly approved before implementation.
+2. The planner inspects the current `dev` state and plans the next meaningful behavior increment with its tasks and dependencies. Planning can occur during phase preparation, but a complete product-wide task breakdown is not required.
+3. The runtime executes eligible tasks through the defined quality gates. Normal technical decisions and bounded repairs do not need human approval.
+4. Accepted changes are integrated into `dev`, checked as an integrated result, and pushed. The planner inspects that actual result and the remaining phase criteria before planning more work.
+5. Once the criteria have evidence on the integrated result, an independent final assessment checks the whole phase. Passing isolated task checks is insufficient. The phase becomes **ready for acceptance** and waits for the developer.
+6. Human feedback produces a correction plan, followed by implementation and renewed verification/review. Feedback that changes the agreed scope or criteria requires an explicit contract revision; ordinary corrections stay within the existing contract.
+7. The phase is **completed** only after human acceptance and all agreed delivery actions. No next phase starts until the developer discusses and approves it.
 
-## Dynamic execution
+The phase states are conceptually in progress, ready for acceptance, in correction, and completed; cancellation and unresolved blockers remain distinct. These are target domain states, not claims about current TypeScript enum names. Automatic evidence collection never substitutes for final human phase acceptance.
 
-There is one workflow per Delivery Run. Its code implements a reusable plan runner. Individual runs receive different plans, such as `review`, `implement -> review`, or later `implement -> review -> security -> publish`. A standalone review references an existing code revision. A publish step requires a contract whose endpoint authorizes that action.
+## Fixed lifecycle, adaptable task plan
 
-The runner repeatedly selects an eligible step, invokes its activity, validates the result, and updates progress. Dependencies, required verdicts, evidence, and repair limits govern eligibility. A failed review does not simply advance a list index. Any code changes invalidate approvals and checks for the previous revision.
+One authoritative phase run owns the approved contract, current task plan, and overall progress. Individual task executions may use subordinate workflows, but do not become separately human-approved delivery contracts.
 
-A capability registry maps approved capability names to activity implementations and agent profiles. A new combination is plan data. A new capability requires implemented, validated worker code and deployment. The planner cannot introduce executable code, grant tools, or bypass required checks by inventing a step name.
+For the initial phase implementation, use a defined implementation lifecycle: prepare workspace, implement, create candidate, run checks, review, and perform bounded repairs. Review is a mandatory quality gate for code changes in the target, although the current task loop still makes it optional.
 
-Plan revisions arrive through recorded activity results or validated workflow messages. Workflow decisions must remain deterministic on replay. Model calls, repository operations, and other external effects belong in activities. Changes to workflow code must preserve compatibility with active executions or use Temporal's versioning mechanisms.
+Task count, decomposition, dependencies, and technical solutions remain adaptable. The planner can split tasks or add necessary technical work within the contract, but cannot waive checks, enlarge authority, weaken criteria, or invent arbitrary executable steps. Newly needed capabilities must be implemented and registered before use. A general graph editor and arbitrary per-run pipelines are not the initial product.
 
-## Events, queues, and state
+Before acceptance, verify combined changes against the phase criteria through integration checks and an independent phase review. Any revision change invalidates check/review evidence for the previous revision; it does not automatically revoke the approved phase contract.
 
-Temporal supplies task queues and records workflow execution history. A worker may serve many runs with bounded concurrency. Project and run IDs identify the correct execution; creating a queue for every project is not required. Runs that share a writable workspace must not write concurrently. Phase one uses isolated Git worktrees and excludes overlapping attempts within a run.
+Broader capabilities such as standalone review, infrastructure work, security checks, release, and deployment may be added as supported workflows with explicit gates. They are not prerequisites for the first phase lifecycle. The earlier requirement to build a general dynamic runner and a review-only path as the first slice is superseded by this narrower delivery direction.
 
-Activity completion already advances its waiting workflow. Agents do not need to publish an extra signal after every step. Claith can record domain events for audit and presentation without using those events as a second workflow scheduler. An event records a fact; an API command or workflow activity requests an action.
+## Git and delivery authority
 
-External asynchronous notifications use Signals. Human decisions use Updates when the caller needs validation and confirmation. Queries expose run state. Message acceptance and business completion are separate: a Signal being accepted does not mean its request has been applied.
+Normal development starts from the current verified `dev`. Writable tasks use isolated purpose branches/worktrees, and accepted work is integrated back into `dev`, followed by integration verification and push. The next increment is planned against that resulting state. Changes must be reconciled and rechecked if the integration base has changed; integration must not discard unrelated work or reuse evidence for another revision.
 
-Phase one does not add a general event inbox or a separate broker. If later work requires controlled batching or serialization of external messages, synchronous handlers can append to a workflow-local inbox and the main method can drain it. That inbox and its processing rules are Claith code; Temporal records messages and reconstructs workflow state through replay.
+`main` is reserved for an explicitly agreed milestone promotion and publication process, for example after an accepted phase. A push to `dev`, promotion to `main`, and an external release/deployment are different operations. The contract must define which endpoint and permissions apply. Merely reaching a phase boundary does not grant publishing authority. The exact publishing workflow remains to be implemented; phase closure still requires the agreed endpoint and human acceptance.
 
-State includes the contract and plan versions, project and run IDs, step progress, attempts, review rounds, code revisions, result references, and pending escalations. A Claith Delivery Run ID is distinct from Temporal's Run ID, which changes with Continue-As-New. The workflow's execution state is authoritative for progress; transcripts and tool output are separate artifacts. UI read models are derived views.
+This is product behavior for future Claith deliveries. It does not itself authorize the coding assistant to push, merge, or publish the repository during unrelated maintenance; the repository's working instructions continue to apply.
 
-The backend runs continuously while individual workflows progress, wait, or finish. Closing the UI does not stop execution. Waiting uses Temporal conditions and durable timers. Long histories can use Continue-As-New, explicitly carrying state and unprocessed messages after active handlers finish. Completed contracts end their workflows.
+## Persistence and state authority
 
-## Agent completion and evidence
+SQLite is the proposed local application store per runtime for phase/feature records, contract versions, plan versions, tasks, dependencies, approvals, and artifact references. Its use was recommended in the design discussion; schema, driver, and migration details remain to be settled during implementation. There is currently no Claith application database. The SQLite used by the local Temporal service is a different store.
 
-Implementer and reviewer have separate Pi sessions and tool profiles. Repository instructions, role instructions, and task context are composed explicitly. The runtime controls the effective tools; prompt instructions alone do not enforce permissions.
+Temporal remains authoritative for running execution state: dispatched work, attempts, pending questions, decisions, timers, and progress. Task-status views stored in an application database are projections of that execution state, not a second scheduler. Agents use validated application commands/tools rather than granting themselves work by editing database rows.
 
-Agents submit structured results through Claith completion tools, initially `submit_implementation` and `submit_review`. The activity validates the schema and binds the submission to the run, step, attempt, review round, and reviewed code revision. It waits for agent execution to finish and flushes audit records before accepting completion. Assistant prose is retained for inspection, not used as the workflow decision protocol.
+Approval binds a contract version, initial plan version, and execution configuration. The workflow receives a recorded snapshot or immutable reference; it must not consult mutable database rows directly during replay. Plan revisions arrive through recorded activity results or validated workflow messages, so external task-source edits cannot silently alter an active run. Model calls and database/file/network operations belong in activities.
 
-A missing completion call receives at most one correction prompt before the attempt is reported as unsuccessful or blocked. A crash, timeout, or cancellation is reported by the runtime even when the model cannot submit a result. `blocked`, `changes_requested`, technical failure, and successful completion have distinct meanings; submission of valid JSON alone does not prove success.
+Large transcripts, outputs, and diffs remain durable artifacts with references rather than being embedded in workflow history. The workflow and its projections must be reconcilable after an interrupted database write or external effect. A separate broker or general event inbox is not required for the initial phase runtime.
 
-Verification references must resolve to recorded checks for the relevant code revision. Tool-call records correlate project, run, step, attempt, session, and tool-call IDs. Capture tool name, arguments, start, result or error, and available timing; a start without an end has an unknown outcome. Store transcripts, large outputs, diffs, and evidence in durable project-scoped artifacts, with references in Temporal state and history.
+Temporal activity completion advances the waiting workflow without an additional agent-generated completion signal. Use Updates for human commands that need validation/confirmation, Signals for asynchronous notifications, and Queries for current state. A shared task queue with bounded worker concurrency is sufficient; project identity does not require a queue per project. Shared writable repositories still require explicit coordination.
 
-## Escalation and recovery
+Workflow code must remain deterministic on replay and compatible with active execution histories, using workflow versioning when necessary. Long-lived phase runs may need Continue-As-New with explicitly carried state; this is an extension requirement, not a feature implemented by the current task workflow. Disconnecting a client does not cancel the run.
 
-An agent blocker, exhausted review budget, exhausted technical recovery, or elapsed deadline can trigger escalation. The workflow records a pending escalation and routes it through the orchestrator or control interface. The request identifies the affected run, step or attempt, and allowed decisions.
+## Evidence, escalation, and recovery
 
-Human replies use an Update that checks authorization, escalation ID, and current state before applying a decision. Late, duplicate, or superseded replies cannot unblock a different request. An authorized reply may resolve the blocker, grant a bounded continuation within the contract, or cancel. A material scope change requires approval of a changed contract.
+Each task contributes to identified phase criteria. Evidence must name the relevant code revision and resolve to recorded checks, review findings, or explicit human confirmation. The final reviewer compares the original phase contract with the integrated result, not only task summaries. Text boundaries and artifact references alone do not prove semantic correctness; improving that verification is part of the phase slice.
 
-A configurable durable timer can cause a reminder or further escalation. Silence never implies approval. Replies and timers are checked against the current pending escalation so a stale deadline cannot undo a resolved decision. Neither waiting nor a reminder completes the Delivery Contract.
+Role sessions are separate. The worker enforces tool rights, validates structured completion and identity, waits for agent execution to finish, and flushes audit logs before accepting results. The existing custom tools and permission registry are documented in [[architecture_tooling]].
 
-Activities may execute more than once. Temporal does not make external effects exactly once. Use stable operation identities, bound retries, and reconcile repository, session, artifact, and external-system state before repeating uncertain work. Preserve completed results, exclude concurrent coding attempts in one workspace, and handle stale results explicitly. Future publish capabilities must reconcile an existing release or other external outcome before retrying.
+Humans normally define/approve a phase and assess its final result. Earlier interruption is reserved for genuine blockers, exhausted authorized recovery, missing authority/input, or a required contract change. Silence and reminders never approve work. Decisions are tied to the pending escalation and run so stale or duplicate replies cannot unblock unrelated work.
 
-## Performance and extension boundaries
+Activities may execute more than once. Preserve stable operation identities, bounded retries, exclusive workspace ownership, and reconciliation of uncertain effects before repeating work. Publish operations require the same discipline once implemented. The existing task runtime has recovery evidence, but this does not establish exactly-once external effects or prove the future phase/publish loop.
 
-Keep workflow inputs and history small: record decisions and artifact references, not each token or full transcript. Bound agent concurrency and per-repository writes. Measure dispatch latency, recovery, idle resource use, and representative agent workloads before making performance claims.
-
-Later capabilities can include infrastructure, security, delivery, and publishing through the same registry and approved plan mechanism. A generic graph editor, marketplace, multiple harness integrations, self-modifying active contracts, and the full team hierarchy are outside phase one. Tool choices are maintained in [[architecture_tooling]].
+The runtime continues while the client is disconnected. Waiting and cancellation remain durable. A completed phase remains idle until another phase is explicitly authorized; it cannot automatically grow a roadmap of additional improvements.
