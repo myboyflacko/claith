@@ -68,7 +68,7 @@ export async function initializeConfiguration(
           model: "",
           reasoning: "medium",
           permissions: rolePolicy[role].permissions,
-          instructions: `You are Claith's ${role}. Follow the approved Delivery Contract and use your structured completion tool.`,
+          instructions: `You are Claith's ${role}. Follow the approved task and use your structured completion tool.`,
         }),
     ]);
   }

@@ -15,6 +15,7 @@ import {
   checksPassed,
   contractSchema,
   runIdentity,
+  revision,
 } from "../domain/contracts.js";
 import type {
   Activities,
@@ -67,7 +68,8 @@ export async function taskWorkflow(input: RunInput): Promise<RunRecord> {
   if (
     !contract.success ||
     !configuration.success ||
-    !runIdentity.safeParse(input.runId).success
+    !runIdentity.safeParse(input.runId).success ||
+    !revision.safeParse(input.startCommit).success
   )
     throw ApplicationFailure.nonRetryable("Invalid task input", "InvalidInput");
   input = {
@@ -80,6 +82,7 @@ export async function taskWorkflow(input: RunInput): Promise<RunRecord> {
     execution: {
       runId: input.runId,
       project: input.project,
+      startCommit: input.startCommit,
       configuration: input.configuration,
       status: "running",
       stage: "prepare",
@@ -184,9 +187,6 @@ export async function taskWorkflow(input: RunInput): Promise<RunRecord> {
         try {
           if (e.stage === "prepare") {
             e.workspace = await act.prepare(input);
-            e.stage = "setup";
-          } else if (e.stage === "setup") {
-            await act.setup({ ...input, workspace: e.workspace! });
             e.stage = "implement";
           } else {
             const attempt = e.repairsUsed;
@@ -226,7 +226,7 @@ export async function taskWorkflow(input: RunInput): Promise<RunRecord> {
               } else if (
                 !history.result.candidate ||
                 !checksPassed(
-                  input.contract,
+                  history.result.candidate.verificationPlan,
                   history.result.checks,
                   history.result.candidate.revision,
                 )
@@ -267,7 +267,7 @@ export async function taskWorkflow(input: RunInput): Promise<RunRecord> {
               e.integration = history.integration;
               if (
                 !checksPassed(
-                  input.contract,
+                  e.integration.verificationPlan,
                   e.integration.checks,
                   e.integration.revision,
                 )

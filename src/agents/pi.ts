@@ -17,25 +17,8 @@ import type {
 import { executionProfileSchema } from "../domain/configuration.js";
 import { rolePolicy, toolRegistry } from "../domain/tools.js";
 import type { Role } from "../configuration.js";
-import {
-  assertSubmission,
-  assertReview,
-  implementationSchema,
-  reviewSchema,
-} from "../domain/contracts.js";
-import type {
-  Activities,
-  AttemptInput,
-  ReviewInput,
-  Implementation,
-  Review,
-  AgentResult,
-} from "../domain/contracts.js";
 import type { ExecutionAgentProfile } from "../domain/configuration.js";
-import { git, assertRevision } from "../workspace/git.js";
-import { withOwnership } from "../workspace/ownership.js";
 import { logEvent, readJson, writeJson } from "../workspace/storage.js";
-import { runCommand } from "../workspace/process.js";
 
 export interface RoleSession {
   prompt(text: string): Promise<unknown>;
@@ -88,7 +71,7 @@ export interface RoleRequest<T> {
   logPath: string;
   profile: ExecutionAgentProfile;
   prompt: string;
-  context?: string;
+  systemPrompt?: string;
   schema: z.ZodType<T>;
   validate: (value: T) => void | Promise<void>;
   customTools?: ToolDefinition[];
@@ -186,13 +169,11 @@ export async function runRole<T>(
       retry: { enabled: false },
     }),
     resourceLoader: resources(
-      `${profile.instructions}\n\n${request.context ?? ""}\n\n${await repositoryContext(request.cwd)}\n\n${
-        request.role === "orchestrator"
-          ? "Concretize only the next task. Preserve explicit dependencies. Propose local-commit contracts; never approve or execute them. Use increasing versions for revised contracts. Explain completion or ask for clarification when needed."
-          : request.role === "implementer"
-            ? "Implement only the approved contract. Do not merge, push, create PRs, or run nested Claith sessions. The runtime creates the candidate commit and runs checks. Include evidence for every non-human criterion; references can name approved check IDs or diff. Submit blocked when authority or inputs are missing."
-            : "Review only the supplied candidate and check evidence. Use read_diff for the approved diff. Do not change files. Submit a verdict for this exact candidate."
-      }`,
+      [
+        profile.instructions,
+        request.systemPrompt ?? "",
+        await repositoryContext(request.cwd),
+      ].join("\n\n"),
     ),
   });
   await writeJson(sessionFile, {
@@ -243,184 +224,4 @@ export async function runRole<T>(
     session.dispose();
     await logging;
   }
-}
-
-export function piActivities(
-  root: string,
-  signal?: AbortSignal,
-  factory?: SessionFactory,
-): Pick<Activities, "implement" | "review"> {
-  async function invoke<T extends Implementation | Review>(
-    input: AttemptInput,
-    role: "implementer" | "reviewer",
-    schema: z.ZodType<T>,
-    prompt: string,
-    customTools: ToolDefinition[],
-    boundRevision: string,
-    validate: (value: T) => Promise<void> | void,
-  ): Promise<AgentResult<T>> {
-    const directory = join(
-      input.workspace.artifactDir,
-      `${role}-${input.attempt}`,
-    );
-    const file = join(directory, "result.json");
-    const prior = await readJson<AgentResult<T>>(file);
-    if (prior) {
-      await validate(prior.submission);
-      return prior;
-    }
-    const submission = await runRole(
-      {
-        role,
-        cwd: input.workspace.path,
-        directory,
-        profile: input.configuration.agents[role],
-        logPath: join(
-          root,
-          "log",
-          `${input.runId}-${role}-${input.attempt}.jsonl`,
-        ),
-        prompt,
-        schema,
-        customTools,
-        validate,
-        ...(signal ? { signal } : {}),
-        correlation: {
-          runId: input.runId,
-          taskId: input.contract.taskId,
-          attempt: input.attempt,
-        },
-        context: JSON.stringify({
-          contract: input.contract,
-          runId: input.runId,
-          attempt: input.attempt,
-          revision: boundRevision,
-          feedback: input.feedback,
-        }),
-      },
-      factory,
-    );
-    const manifest = await readJson<{ id: string }>(
-      join(directory, "session.json"),
-    );
-    if (!manifest?.id) throw new Error("Missing Pi session identity");
-    const result = { sessionId: manifest.id, submission };
-    await writeJson(file, result);
-    return result;
-  }
-  return {
-    implement: async (input) =>
-      withOwnership(input.workspace.artifactDir, async () => {
-        const commit = await git(input.workspace.path, "rev-parse", "HEAD");
-        const bash: ToolDefinition = {
-          name: "bash",
-          label: "Bash",
-          description:
-            "Execute a command in the task worktree; output is persisted",
-          parameters: Type.Object({
-            command: Type.String(),
-            timeout: Type.Optional(Type.Number()),
-          }),
-          execute: async (id, parameters, toolSignal) => {
-            const args = parameters as { command: string; timeout?: number };
-            const output = join(
-              input.workspace.artifactDir,
-              `bash-${input.attempt}-${id.replace(/[^A-Za-z0-9_-]/g, "_")}.log`,
-            );
-            const signals = [signal, toolSignal].filter(
-              (s): s is AbortSignal => !!s,
-            );
-            const exitCode = await runCommand(args.command, {
-              cwd: input.workspace.path,
-              output,
-              timeoutMs:
-                Math.max(
-                  1,
-                  Math.min(
-                    args.timeout ??
-                      input.configuration.runtime.checkTimeoutSeconds,
-                    input.configuration.runtime.checkTimeoutSeconds,
-                  ),
-                ) * 1000,
-              ...(signals.length ? { signal: AbortSignal.any(signals) } : {}),
-            });
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: `${(await readFile(output, "utf8")).slice(-48000)}\nExit: ${exitCode}; full output: ${output}`,
-                },
-              ],
-              details: { exitCode, output },
-              isError: exitCode !== 0,
-            };
-          },
-        };
-        // Preserve the original input revision across recovery after agent effects.
-        const bindingFile = join(
-          input.workspace.artifactDir,
-          `implementer-${input.attempt}-input.json`,
-        );
-        const binding = (await readJson<{ revision: string }>(bindingFile)) ?? {
-          revision: commit,
-        };
-        await writeJson(bindingFile, binding);
-        return invoke(
-          input,
-          "implementer",
-          implementationSchema,
-          input.contract.tasks,
-          [bash],
-          binding.revision,
-          (value) => {
-            assertSubmission(input, value, binding.revision);
-            if (
-              value.evidence.some(
-                (e) =>
-                  !input.contract.acceptanceCriteria.some(
-                    (a) => a.id === e.criterionId,
-                  ) ||
-                  e.references.some(
-                    (r) =>
-                      r !== "diff" &&
-                      !input.contract.checks.some((c) => c.id === r),
-                  ),
-              )
-            )
-              throw new Error("Unknown implementation evidence");
-          },
-        );
-      }),
-    review: async (input: ReviewInput) =>
-      withOwnership(input.workspace.artifactDir, async () => {
-        await assertRevision(input.workspace, input.candidate.revision);
-        const diff: ToolDefinition = {
-          name: "read_diff",
-          label: "Read candidate diff",
-          description: "Read the exact candidate diff",
-          parameters: Type.Object({}),
-          execute: async () => ({
-            content: [
-              {
-                type: "text",
-                text: await readFile(input.candidate.diffRef, "utf8"),
-              },
-            ],
-            details: { revision: input.candidate.revision },
-          }),
-        };
-        return invoke(
-          input,
-          "reviewer",
-          reviewSchema,
-          `${input.contract.tasks}\n\nCandidate: ${input.candidate.revision}\nChecks: ${JSON.stringify(input.checks)}`,
-          [diff],
-          input.candidate.revision,
-          async (value) => {
-            assertReview(input, value);
-            await assertRevision(input.workspace, input.candidate.revision);
-          },
-        );
-      }),
-  };
 }

@@ -12,6 +12,7 @@ import type {
 } from "../configuration.js";
 import { contractSchema, runIdentity } from "../domain/contracts.js";
 import type { RunInput, RunRecord, TaskContract } from "../domain/contracts.js";
+import { git } from "../workspace/git.js";
 import { projectId } from "../workspace/storage.js";
 export class DeliveryClient {
   constructor(
@@ -36,7 +37,14 @@ export class DeliveryClient {
     const contract = contractSchema.parse(value);
     const project = await realpath(projectPath);
     const runId = `task-${projectId(project)}-${contract.taskId}-v${contract.version}`;
-    const input: RunInput = { runId, project, contract, configuration };
+    const startCommit = await git(project, "rev-parse", "refs/heads/dev");
+    const input: RunInput = {
+      runId,
+      project,
+      startCommit,
+      contract,
+      configuration,
+    };
     try {
       await this.client.workflow.start("taskWorkflow", {
         workflowId: runId,

@@ -14,11 +14,16 @@ import type {
   IntegrationInput,
   WorkInput,
   SessionReference,
+  VerificationPlan,
+  Implementation,
+  AgentResult,
 } from "../domain/contracts.js";
 import {
   assertReview,
   checksPassed,
   runIdentity,
+  implementationSchema,
+  verificationPlanSchema,
 } from "../domain/contracts.js";
 import { runCommand } from "./process.js";
 import { withOwnership } from "./ownership.js";
@@ -70,9 +75,9 @@ async function fetchDev(project: string): Promise<string> {
 }
 async function requireBase(input: RunInput): Promise<void> {
   if (
-    (await fetchDev(input.project)) !== input.contract.startCommit ||
+    (await fetchDev(input.project)) !== input.startCommit ||
     (await git(input.project, "rev-parse", "refs/heads/dev")) !==
-      input.contract.startCommit
+      input.startCommit
   )
     baseChanged();
 }
@@ -108,15 +113,34 @@ async function ensureWorktree(
   )
     throw new Error("Workspace branch changed");
 }
+class SetupFailed extends Error {
+  constructor(readonly outputRef: string) {
+    super(`Setup failed; see ${outputRef}`);
+  }
+}
 export async function runSetup(
   input: WorkInput,
+  plan: VerificationPlan,
+  prefix: string,
   signal?: AbortSignal,
 ): Promise<void> {
-  for (const command of input.contract.setup) {
-    const file = join(input.workspace.artifactDir, `setup-${command.id}`);
-    const done = await readJson<{ exitCode: number | null }>(file + ".json");
-    if (done?.exitCode === 0) continue;
-    if ((await readJson(file + ".started.json")) && !done)
+  for (const command of plan.setup) {
+    const file = join(
+      input.workspace.artifactDir,
+      `${prefix}-setup-${command.id}`,
+    );
+    const done = await readJson<{ exitCode: number | null; command: string }>(
+      file + ".json",
+    );
+    if (done?.exitCode === 0) {
+      if (done.command !== command.command)
+        throw new Error("Setup checkpoint belongs to another command");
+      continue;
+    }
+    if (
+      ((await readJson(file + ".started.json")) && !done) ||
+      done?.exitCode === null
+    )
       throw new Error(
         `Setup ${command.id} has an uncertain outcome; reconcile preserved output`,
       );
@@ -127,9 +151,12 @@ export async function runSetup(
       timeoutMs: input.configuration.runtime.checkTimeoutSeconds * 1000,
       ...(signal ? { signal } : {}),
     });
-    await writeJson(file + ".json", { exitCode });
-    if (exitCode !== 0)
-      throw new Error(`Setup ${command.id} failed; see ${file}.log`);
+    await writeJson(file + ".json", { exitCode, command: command.command });
+    if (exitCode === null)
+      throw new Error(
+        `Setup ${command.id} has an uncertain outcome; reconcile preserved output`,
+      );
+    if (exitCode !== 0) throw new SetupFailed(file + ".log");
   }
 }
 async function checkCommands(
@@ -137,13 +164,22 @@ async function checkCommands(
   workspace: Workspace,
   commit: string,
   prefix: string,
+  plan: VerificationPlan,
   signal?: AbortSignal,
 ): Promise<CommandEvidence[]> {
   await assertRevision(workspace, commit);
   const file = join(workspace.artifactDir, `${prefix}.json`);
   const saved = await readJson<CommandEvidence[]>(file);
   if (saved) {
-    if (saved.some((e) => e.revision !== commit))
+    if (
+      saved.length !== plan.checks.length ||
+      saved.some(
+        (e, i) =>
+          e.command !== plan.checks[i]?.command ||
+          e.id !== plan.checks[i]?.id ||
+          e.revision !== commit,
+      )
+    )
       throw new Error("Cached checks belong to another revision");
     return saved;
   }
@@ -154,7 +190,24 @@ async function checkCommands(
   });
   const evidence: CommandEvidence[] = [];
   try {
-    for (const command of input.contract.checks) {
+    try {
+      await runSetup({ ...input, workspace }, plan, prefix, signal);
+    } catch (error) {
+      if (!(error instanceof SetupFailed)) throw error;
+      // Checks were not executed: retain the setup log as failure evidence for repair.
+      evidence.push(
+        ...plan.checks.map((command) => ({
+          ...command,
+          exitCode: null,
+          outputRef: error.outputRef,
+          revision: commit,
+          unchanged: !changed,
+        })),
+      );
+      await writeJson(file, evidence);
+      return evidence;
+    }
+    for (const command of plan.checks) {
       const outputRef = join(
         workspace.artifactDir,
         `${prefix}-${command.id}.log`,
@@ -196,7 +249,6 @@ export function workspaceActivities(
 ): Pick<
   Activities,
   | "prepare"
-  | "setup"
   | "candidate"
   | "check"
   | "integrate"
@@ -249,7 +301,13 @@ export function workspaceActivities(
       JSON.stringify(delivery) !== JSON.stringify(input.integration)
     )
       throw new Error("Integration does not match recorded evidence");
-    if (!checksPassed(input.contract, delivery.checks, delivery.revision))
+    if (
+      !checksPassed(
+        delivery.verificationPlan,
+        delivery.checks,
+        delivery.revision,
+      )
+    )
       throw new Error("Invalid integration check evidence");
   }
   return {
@@ -273,7 +331,7 @@ export function workspaceActivities(
             if (block.includes("branch refs/heads/dev"))
               await assertRevision(
                 { path: block.split("\n")[0]!.slice(9) },
-                input.contract.startCommit,
+                input.startCommit,
               );
           }
           await git(input.project, "var", "GIT_AUTHOR_IDENT");
@@ -285,24 +343,54 @@ export function workspaceActivities(
               input.runId,
             ),
             branch: `feature/claith-${input.runId}`,
-            base: input.contract.startCommit,
+            base: input.startCommit,
             artifactDir,
           };
           await ensureWorktree(input, workspace);
           return workspace;
         });
       }),
-    setup: (input) => guarded(input, () => runSetup(input, signal)),
     candidate: (input: AttemptInput) =>
       guarded(input, async () => {
         const file = join(
           input.workspace.artifactDir,
           `candidate-${input.attempt}.json`,
         );
-        const saved = await readJson<{ revision: string; diffRef: string }>(
-          file,
+        const implementation = await readJson<AgentResult<Implementation>>(
+          join(
+            input.workspace.artifactDir,
+            `implementer-${input.attempt}`,
+            "result.json",
+          ),
         );
+        if (!implementation)
+          throw new Error("Missing implementation submission");
+        const submission = implementationSchema.parse(
+          implementation.submission,
+        );
+        if (
+          submission.status !== "submitted" ||
+          submission.runId !== input.runId ||
+          submission.taskId !== input.contract.taskId ||
+          submission.version !== input.contract.version ||
+          submission.attempt !== input.attempt ||
+          !submission.verificationPlan
+        )
+          throw new Error("Missing or mismatched verification plan");
+        const verificationPlan = verificationPlanSchema.parse(
+          submission.verificationPlan,
+        );
+        const saved = await readJson<{
+          revision: string;
+          diffRef: string;
+          verificationPlan: VerificationPlan;
+        }>(file);
         if (saved) {
+          if (
+            JSON.stringify(saved.verificationPlan) !==
+            JSON.stringify(verificationPlan)
+          )
+            throw new Error("Candidate verification plan changed");
           await assertRevision(input.workspace, saved.revision);
           return saved;
         }
@@ -335,11 +423,11 @@ export function workspaceActivities(
             input.workspace.path,
             "diff",
             "--no-ext-diff",
-            input.contract.startCommit,
+            input.startCommit,
             commit,
           ),
         );
-        const candidate = { revision: commit, diffRef };
+        const candidate = { revision: commit, diffRef, verificationPlan };
         await writeJson(file, candidate);
         return candidate;
       }),
@@ -350,6 +438,7 @@ export function workspaceActivities(
           input.workspace,
           input.candidate.revision,
           `checks-${input.attempt}`,
+          input.candidate.verificationPlan,
           signal,
         ),
       ),
@@ -358,6 +447,12 @@ export function workspaceActivities(
         guarded(input, async () => {
           await requireBase(input);
           assertReview(input, input.review.submission);
+          const recordedCandidate = await readJson(
+            join(
+              input.workspace.artifactDir,
+              `candidate-${input.attempt}.json`,
+            ),
+          );
           const recordedChecks = await readJson(
             join(input.workspace.artifactDir, `checks-${input.attempt}.json`),
           );
@@ -369,6 +464,8 @@ export function workspaceActivities(
             ),
           );
           if (
+            JSON.stringify(recordedCandidate) !==
+              JSON.stringify(input.candidate) ||
             JSON.stringify(recordedChecks) !== JSON.stringify(input.checks) ||
             JSON.stringify(recordedReview) !== JSON.stringify(input.review) ||
             input.review.submission.verdict !== "accepted"
@@ -394,11 +491,11 @@ export function workspaceActivities(
             await ensureWorktree(input, {
               path,
               branch,
-              base: input.contract.startCommit,
+              base: input.startCommit,
               artifactDir: input.workspace.artifactDir,
             });
             const head = await git(path, "rev-parse", "HEAD");
-            if (head === input.contract.startCommit)
+            if (head === input.startCommit)
               await git(
                 path,
                 "-c",
@@ -413,7 +510,7 @@ export function workspaceActivities(
               await git(path, "show", "-s", "--format=%P", "HEAD")
             ).split(" ");
             if (
-              parents[0] !== input.contract.startCommit ||
+              parents[0] !== input.startCommit ||
               parents[1] !== input.candidate.revision ||
               parents.length !== 2
             )
@@ -425,19 +522,26 @@ export function workspaceActivities(
               {
                 path,
                 branch,
-                base: input.contract.startCommit,
+                base: input.startCommit,
                 artifactDir: input.workspace.artifactDir,
               },
               commit,
               `integration-checks-${input.attempt}`,
+              input.candidate.verificationPlan,
               signal,
             );
-            integration = { revision: commit, path, branch, checks };
+            integration = {
+              revision: commit,
+              path,
+              branch,
+              checks,
+              verificationPlan: input.candidate.verificationPlan,
+            };
             await writeJson(file, integration);
           }
           if (
             checksPassed(
-              input.contract,
+              integration.verificationPlan,
               integration.checks,
               integration.revision,
             )
@@ -476,8 +580,8 @@ export function workspaceActivities(
           return;
         }
         if (
-          remote !== input.contract.startCommit ||
-          (local !== input.contract.startCommit && local !== commit)
+          remote !== input.startCommit ||
+          (local !== input.startCommit && local !== commit)
         )
           baseChanged();
         const blocks = (
@@ -502,9 +606,9 @@ export function workspaceActivities(
             "update-ref",
             "refs/heads/dev",
             commit,
-            input.contract.startCommit,
+            input.startCommit,
           );
-        if ((await fetchDev(input.project)) !== input.contract.startCommit)
+        if ((await fetchDev(input.project)) !== input.startCommit)
           baseChanged();
         // Push the exact verified object, never an unbounded moving local ref.
         await git(input.project, "push", "origin", `${commit}:refs/heads/dev`);

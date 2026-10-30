@@ -1,7 +1,9 @@
 import { Context } from "@temporalio/activity";
 import { join } from "node:path";
 import type { Activities, RunInput, RunRecord } from "../domain/contracts.js";
-import { piActivities } from "../agents/pi.js";
+import { createImplementer } from "../agents/implementer.js";
+import { createReviewer } from "../agents/reviewer.js";
+import type { AttemptInput, ReviewInput } from "../domain/contracts.js";
 import type { SessionFactory } from "../agents/pi.js";
 import { workspaceActivities } from "../workspace/git.js";
 import { logEvent } from "../workspace/storage.js";
@@ -39,7 +41,20 @@ export function createActivities(
         });
         const adapters = {
           ...workspaceActivities(root, context.cancellationSignal),
-          ...piActivities(root, context.cancellationSignal, factory),
+          implement: ({ contract, ...input }: AttemptInput) =>
+            createImplementer({
+              ...input,
+              root,
+              signal: context.cancellationSignal,
+              ...(factory ? { factory } : {}),
+            }).run(contract),
+          review: ({ contract, ...input }: ReviewInput) =>
+            createReviewer({
+              ...input,
+              root,
+              signal: context.cancellationSignal,
+              ...(factory ? { factory } : {}),
+            }).run(contract),
         };
         const result = await (
           adapters[name] as (v: unknown) => Promise<unknown>
@@ -63,7 +78,6 @@ export function createActivities(
   }
   return {
     prepare: register("prepare"),
-    setup: register("setup"),
     implement: register("implement"),
     candidate: register("candidate"),
     check: register("check"),

@@ -8,7 +8,12 @@ import { TestWorkflowEnvironment } from "@temporalio/testing";
 import { Context } from "@temporalio/activity";
 import { Worker, bundleWorkflowCode } from "@temporalio/worker";
 import type { Activities, RunRecord } from "../src/domain/contracts.js";
-import { taskInput, acceptedReview, projectFixture } from "./fixtures/task.js";
+import {
+  taskInput,
+  acceptedReview,
+  projectFixture,
+  verificationPlan,
+} from "./fixtures/task.js";
 import { createActivities } from "../src/runtime/activities.js";
 import { fixtureFactory } from "./fixtures/agent.js";
 import { git } from "../src/workspace/git.js";
@@ -71,10 +76,9 @@ describe("single-task delivery workflows", () => {
       prepare: async () => ({
         path: "/work",
         branch: "task",
-        base: input.contract.startCommit,
+        base: input.startCommit,
         artifactDir: "/artifacts",
       }),
-      setup: async () => {},
       implement: async (i) => {
         calls.push(`implement-${i.attempt}`);
         if (options.longImplement) {
@@ -103,9 +107,10 @@ describe("single-task delivery workflows", () => {
             taskId: i.contract.taskId,
             version: i.contract.version,
             attempt: i.attempt,
-            revision: i.contract.startCommit,
+            revision: i.startCommit,
             status: "submitted",
             summary: "Done",
+            verificationPlan: verificationPlan(),
             evidence: [{ criterionId: "works", references: ["test"] }],
           },
         };
@@ -113,9 +118,10 @@ describe("single-task delivery workflows", () => {
       candidate: async (i) => ({
         revision: (i.attempt ? "c" : "b").repeat(40),
         diffRef: "diff",
+        verificationPlan: verificationPlan(),
       }),
       check: async (i) =>
-        i.contract.checks.map((c) => ({
+        i.candidate.verificationPlan.checks.map((c) => ({
           ...c,
           exitCode: options.failedChecks && i.attempt === 0 ? 1 : 0,
           outputRef: "log",
@@ -137,6 +143,7 @@ describe("single-task delivery workflows", () => {
         if (options.baseChanged)
           throw new Error("Development base changed; new contract required");
         return {
+          verificationPlan: i.candidate.verificationPlan,
           path: "/integration",
           branch: "integration",
           revision: "e".repeat(40),

@@ -13,51 +13,43 @@ export const commandSchema = z.strictObject({
 export const criterionSchema = z.strictObject({
   id: identity,
   text: z.string().trim().min(1),
-  mode: z.enum(["check", "review"]),
-  checkId: identity.nullable(),
 });
 export const contractSchema = z
   .strictObject({
     taskId: identity,
     version: z.number().int().positive(),
-    startCommit: revision,
     title: z.string().trim().min(1),
-    tasks: z.string().min(1),
-    goal: z.string().trim().min(1),
-    context: z.string(),
-    scope: z.string(),
-    constraints: z.string(),
+    description: z
+      .string()
+      .refine((value) => value.trim().length > 0, "Description is required"),
     acceptanceCriteria: z.array(criterionSchema).min(1),
+  })
+  .superRefine((task, ctx) => {
+    if (
+      new Set(task.acceptanceCriteria.map((c) => c.id)).size !==
+      task.acceptanceCriteria.length
+    )
+      ctx.addIssue({ code: "custom", message: "Duplicate criterion IDs" });
+  });
+export const verificationPlanSchema = z
+  .strictObject({
     setup: z.array(commandSchema).default([]),
     checks: z.array(commandSchema).min(1),
   })
-  .superRefine((c, ctx) => {
-    for (const ids of [
-      c.acceptanceCriteria.map((a) => a.id),
-      [...c.setup, ...c.checks].map((a) => a.id),
-    ]) {
-      if (new Set(ids).size !== ids.length)
-        ctx.addIssue({
-          code: "custom",
-          message: "Duplicate criterion or command IDs",
-        });
-    }
-    for (const a of c.acceptanceCriteria) {
-      if (
-        a.mode === "check"
-          ? !c.checks.some((ch) => ch.id === a.checkId)
-          : a.checkId !== null
-      )
-        ctx.addIssue({
-          code: "custom",
-          message: `Invalid verification for ${a.id}`,
-        });
-    }
+  .superRefine((plan, ctx) => {
+    const ids = [...plan.setup, ...plan.checks].map((c) => c.id);
+    if (new Set(ids).size !== ids.length || ids.includes("diff"))
+      ctx.addIssue({
+        code: "custom",
+        message: "Duplicate or reserved command IDs",
+      });
   });
+export type VerificationPlan = z.infer<typeof verificationPlanSchema>;
 export type TaskContract = z.infer<typeof contractSchema>;
 export interface RunInput {
   runId: string;
   project: string;
+  startCommit: string;
   contract: TaskContract;
   configuration: ExecutionConfiguration;
 }
@@ -85,6 +77,7 @@ const submissionIdentity = z.strictObject({
 export const implementationSchema = submissionIdentity.extend({
   status: z.enum(["submitted", "blocked"]),
   summary: z.string().min(1),
+  verificationPlan: verificationPlanSchema.nullable(),
   evidence: z.array(
     z.strictObject({
       criterionId: identity,
@@ -92,6 +85,29 @@ export const implementationSchema = submissionIdentity.extend({
     }),
   ),
 });
+export function assertImplementation(
+  input: AttemptInput,
+  value: Implementation,
+  commit: string,
+): void {
+  assertSubmission(input, value, commit);
+  if (value.status === "submitted" && !value.verificationPlan)
+    throw new Error("Submitted implementation requires a verification plan");
+  if (
+    value.evidence.some(
+      (e) =>
+        !input.contract.acceptanceCriteria.some(
+          (c) => c.id === e.criterionId,
+        ) ||
+        e.references.some(
+          (r) =>
+            r !== "diff" &&
+            !value.verificationPlan?.checks.some((c) => c.id === r),
+        ),
+    )
+  )
+    throw new Error("Unknown implementation evidence");
+}
 export const reviewSchema = submissionIdentity.extend({
   verdict: z.enum(["accepted", "changes_requested", "blocked"]),
   summary: z.string().min(1),
@@ -111,6 +127,7 @@ export interface AgentResult<T> {
   submission: T;
 }
 export interface Candidate {
+  verificationPlan: VerificationPlan;
   revision: string;
   diffRef: string;
 }
@@ -141,10 +158,10 @@ export interface Integration {
   path: string;
   branch: string;
   checks: CommandEvidence[];
+  verificationPlan: VerificationPlan;
 }
 export type Stage =
   | "prepare"
-  | "setup"
   | "implement"
   | "review"
   | "integrate"
@@ -164,6 +181,7 @@ export interface RunRecord {
   execution: {
     runId: string;
     project: string;
+    startCommit: string;
     configuration: ExecutionConfiguration;
     status: "running" | "blocked" | "completed" | "cancelled";
     stage: Stage;
@@ -195,7 +213,6 @@ export interface IntegrationInput extends RunInput {
 }
 export interface Activities {
   prepare(input: RunInput): Promise<Workspace>;
-  setup(input: WorkInput): Promise<void>;
   implement(input: AttemptInput): Promise<AgentResult<Implementation>>;
   candidate(input: AttemptInput): Promise<Candidate>;
   check(input: ReviewInput): Promise<CommandEvidence[]>;
@@ -206,13 +223,14 @@ export interface Activities {
   record(input: RunRecord): Promise<SessionReference[]>;
 }
 export function checksPassed(
-  contract: TaskContract,
+  plan: VerificationPlan,
   checks: CommandEvidence[],
   commit: string,
 ): boolean {
   return (
-    checks.length === contract.checks.length &&
-    contract.checks.every((c) =>
+    plan.checks.length > 0 &&
+    checks.length === plan.checks.length &&
+    plan.checks.every((c) =>
       checks.some(
         (e) =>
           e.id === c.id &&
@@ -262,15 +280,15 @@ export function assertReview(input: ReviewInput, review: Review): void {
   if (
     review.verdict === "accepted" &&
     (review.findings.length ||
-      !checksPassed(input.contract, input.checks, input.candidate.revision) ||
+      !checksPassed(
+        input.candidate.verificationPlan,
+        input.checks,
+        input.candidate.revision,
+      ) ||
       input.contract.acceptanceCriteria.some(
         (a) =>
           !review.criteria.some(
-            (c) =>
-              c.criterionId === a.id &&
-              c.satisfied &&
-              c.references.length &&
-              (a.mode !== "check" || c.references.includes(a.checkId!)),
+            (c) => c.criterionId === a.id && c.satisfied && c.references.length,
           ),
       ))
   )

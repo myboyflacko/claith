@@ -2,6 +2,7 @@ import { writeFile } from "node:fs/promises";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import type { SessionFactory } from "../../src/agents/pi.js";
+import { verificationPlan } from "./task.js";
 import type { TaskContract } from "../../src/domain/contracts.js";
 export function fixtureFactory(
   sessions: string[],
@@ -9,31 +10,28 @@ export function fixtureFactory(
 ): SessionFactory {
   return async (options) => {
     sessions.push(options.sessionManager!.getSessionId());
-    const system = options.resourceLoader!.getSystemPrompt()!;
-    const line = system.split("\n").find((l) => l.startsWith('{"contract":'))!;
-    const context = JSON.parse(line) as {
-      contract: TaskContract;
-      runId: string;
-      attempt: number;
-      revision: string;
-      feedback: string;
-    };
     const implementer = options.tools!.includes("submit_implementation");
-    const identity = {
-      runId: context.runId,
-      taskId: context.contract.taskId,
-      version: context.contract.version,
-      attempt: context.attempt,
-      revision: context.revision,
-    };
     return {
       session: {
         subscribe: () => () => {},
         abort: async () => {},
         dispose: () => {},
         prompt: async (text) => {
-          if (implementer) assert.equal(text, context.contract.tasks);
-          else assert.ok(text.startsWith(context.contract.tasks));
+          const context = JSON.parse(text) as {
+            task: TaskContract;
+            runId: string;
+            attempt: number;
+            revision: string;
+            feedback: string;
+          };
+          assert.ok(context.task.description);
+          const identity = {
+            runId: context.runId,
+            taskId: context.task.taskId,
+            version: context.task.version,
+            attempt: context.attempt,
+            revision: context.revision,
+          };
           if (implementer && firstReviewFindings && context.attempt > 0)
             assert.ok(context.feedback.includes("Improve behavior"));
           options.sessionManager!.appendMessage({
@@ -53,6 +51,7 @@ export function fixtureFactory(
                 ...identity,
                 status: "submitted",
                 summary: "Implemented",
+                verificationPlan: verificationPlan(),
                 evidence: [{ criterionId: "works", references: ["test"] }],
               }
             : {

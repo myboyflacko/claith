@@ -20,39 +20,24 @@ docker compose up -d --wait
 npm run dev -- runtime
 ```
 
-In another terminal, create a task JSON file. `startCommit` must be the full current
-`dev` commit; replace the example hash below with that value.
+In another terminal, create a task JSON file. Describe the expected behavior,
+context, scope and constraints in `description`; acceptance criteria describe
+observable results. The runtime captures the current local `dev` commit separately.
 
 ```json
 {
   "taskId": "config-errors",
   "version": 1,
-  "startCommit": "0123456789012345678901234567890123456789",
   "title": "Explain invalid configuration",
-  "tasks": "Return an actionable error when the configuration is invalid. Add targeted tests.",
-  "goal": "Users can correct invalid configuration without inspecting source code.",
-  "context": "The runtime loads config.toml before dispatching work.",
-  "scope": "Configuration loading and its tests.",
-  "constraints": "Preserve existing valid configuration behavior.",
+  "description": "Return an actionable error when configuration is invalid, so users can correct it without inspecting source code. Limit changes to configuration loading and its tests. Preserve existing valid configuration behavior.",
   "acceptanceCriteria": [
     {
       "id": "errors",
-      "text": "Invalid configuration identifies the affected field.",
-      "mode": "check",
-      "checkId": "config-tests"
+      "text": "Invalid configuration identifies the affected field."
     },
     {
-      "id": "scope",
-      "text": "Changes remain within the task scope.",
-      "mode": "review",
-      "checkId": null
-    }
-  ],
-  "setup": [{ "id": "install", "command": "npm ci" }],
-  "checks": [
-    {
-      "id": "config-tests",
-      "command": "npm run test -- tests/configuration.test.ts"
+      "id": "compatibility",
+      "text": "Existing valid configuration continues to load."
     }
   ]
 }
@@ -72,10 +57,13 @@ unchanged contract and its execution history. Identical submissions return the
 existing run ID; a conflicting contract/configuration with the same project,
 task ID and version is rejected. Use a new version for a changed contract.
 
-The former `chat`, task approval conversation, and coordinator workflows have
-been removed. Stop or resolve old workers/runs before upgrading; old sessions are
-not migrated. `docs/acceptance.md` preserves evidence for that historical runtime,
-not the current command interface. There is no per-task interactive approval gate.
+This task schema replaces the previous task format: use `description` instead of
+`tasks`/`goal`/`context`/`scope`/`constraints`, retain only `id` and `text` on criteria,
+and remove `startCommit`, `setup` and `checks`. Existing task files are not migrated.
+Stop or finish active runs before replacing workers: this changes workflow inputs,
+activity results and scheduling and does not support replaying old active runs.
+Historical session artifacts remain intact. The former chat/coordinator commands
+remain removed; `docs/acceptance.md` preserves evidence for that historical runtime.
 
 ## Execution and blockers
 
@@ -86,16 +74,35 @@ review session against that exact revision. All criteria must have evidence and
 all findings must be resolved before acceptance. Failed checks skip review and
 return feedback to the next attempt.
 
-`tasks` is the unchanged initial implementer prompt. Both roles receive the full
-contract and attempt identity as authoritative context. Fix sessions receive prior
-findings and check results. Work continues in the existing task worktree. Technical
-recovery retains the same attempt/session identity and reconciles effects before
-resuming; a new logical repair gets a new session.
+The contract contains only `taskId`, `version`, `title`, `description` and behavioral
+`acceptanceCriteria`. Model, tools, permissions, runtime settings and the start commit
+belong to the execution context, outside the task. Configuration and resolved tool
+selections are captured for the run rather than reloaded during repairs.
+
+Importable `createImplementer(context)` and `createReviewer(context)` modules bind the
+role profile, tools, Markdown prompt template and execution context; callers invoke
+`.run(task)`. TOML instructions and role templates form the system prompt together
+with repository instructions. The task and invocation data are rendered into the user
+message. The reviewer automatically receives candidate/check evidence and can inspect
+the approved diff with `read_diff`. Fix sessions receive prior findings and check
+results. Technical recovery retains the same attempt/session identity; a new logical
+repair gets a new session in the existing task worktree.
+
+The implementer follows applicable `AGENTS.md` verification guidance. Without it,
+the agent chooses appropriate verification using its judgment. Its structured result
+contains a `verificationPlan`: optional `setup` commands and at least one `checks`
+command, each with a unique `id` and `command` (`diff` is reserved for evidence).
+Commands run from the worktree root. Include dependency installation in setup;
+checks must not modify tracked files. The runtime creates the candidate commit,
+records that attempt's plan and executes setup/checks against the exact candidate.
+Required setup and the same checks run again in the fresh integration worktree.
+The reviewer assesses whether the chosen checks and evidence sufficiently demonstrate
+each behavioral criterion, as well as checking code, scope and project standards.
 
 `maxRepairs = 2` permits the initial attempt plus two repairs. Exhaustion blocks
 until explicitly extended. Other blockers can be resumed after their underlying
 cause has been resolved. `resume` targets the current blocker; stale or conflicting
-commands are rejected. A changed local or remote `dev` base requires a new contract
+commands are rejected. A changed local or remote `dev` base requires a new task
 version and run, not an automatic rebase. The previous workspace remains available
 for work recovery.
 
@@ -130,7 +137,7 @@ OS/filesystem sandbox. Pi's normal authentication is used; arbitrary extensions,
 skills, MCP servers and packages are not loaded. Later registry/profile edits do
 not expand an existing execution's saved rights.
 
-Run data is under `~/.claith/sessions/<run-id>/`: `input.json`, the JSON `run.json`
+Run data is under `~/.claith/sessions/<run-id>/`: `input.json` (task plus execution snapshot), the JSON `run.json`
 contract/execution record, per-role/per-attempt session manifests and results,
 candidate diffs, check evidence, integration/delivery checkpoints, and confirmed
 push/cleanup records. Logs are under `~/.claith/log/`; temporary worktrees are under

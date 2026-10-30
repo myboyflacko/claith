@@ -4,6 +4,7 @@ import { runtimeSchema } from "../../src/configuration.js";
 import { contractSchema } from "../../src/domain/contracts.js";
 import type {
   RunInput,
+  VerificationPlan,
   ReviewInput,
   Review,
 } from "../../src/domain/contracts.js";
@@ -16,6 +17,7 @@ export function taskInput(
   return {
     runId: "test-task-v1",
     project,
+    startCommit,
     configuration: {
       runtime: runtimeSchema.parse({}),
       agents: agentProfiles(),
@@ -23,17 +25,10 @@ export function taskInput(
     contract: contractSchema.parse({
       taskId: "task",
       version: 1,
-      startCommit,
       title: "Task",
-      tasks: "Create the requested behavior.",
-      goal: "Requested behavior",
-      context: "Fixture",
-      scope: "source.txt",
-      constraints: "Preserve unrelated files",
-      acceptanceCriteria: [
-        { id: "works", text: "Behavior works", mode: "check", checkId: "test" },
-      ],
-      checks: [{ id: "test", command: "test -f source.txt" }],
+      description:
+        "Create the requested behavior in source.txt. Preserve unrelated files.",
+      acceptanceCriteria: [{ id: "works", text: "Behavior works" }],
     }),
   };
 }
@@ -70,7 +65,11 @@ export function acceptedReview(input: ReviewInput): Review {
     criteria: input.contract.acceptanceCriteria.map((c) => ({
       criterionId: c.id,
       satisfied: true,
-      references: [c.checkId ?? "diff"],
+      references: [input.candidate.verificationPlan.checks[0]!.id],
     })),
   };
+}
+
+export function verificationPlan(): VerificationPlan {
+  return { setup: [], checks: [{ id: "test", command: "test -f source.txt" }] };
 }
