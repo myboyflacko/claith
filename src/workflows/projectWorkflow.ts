@@ -10,6 +10,7 @@ import {
   isCancellation,
   getExternalWorkflowHandle,
   proxyActivities,
+  patched,
   setHandler,
   sleep,
   startChild,
@@ -17,6 +18,7 @@ import {
 } from "@temporalio/workflow";
 import { createConfig } from "./config.js";
 import { uuidv4 } from "../lib/uuid.js";
+import type { RunRecord } from "../domain/contracts.js";
 import type {
   AddTaskSignal,
   ChildStatus,
@@ -27,6 +29,8 @@ import type {
   NewContractSignal,
   OrchestratorWorkflow,
   ProjectActivities,
+  PreparedTaskRun,
+  TaskDeliveryWorkflow,
   ProjectCommand,
   ProjectHealth,
   ProjectRepository,
@@ -77,6 +81,8 @@ type Completion = {
   task: Task;
   result: ChildWorkflowResult;
   worktree: WorktreeState;
+  prepared?: PreparedTaskRun;
+  record?: RunRecord;
 };
 
 export async function projectWorkflow(
@@ -84,6 +90,7 @@ export async function projectWorkflow(
 ): Promise<void> {
   if (!input.gitUrl?.trim()) invalid("gitUrl is required");
   const cp = input.checkpoint;
+  const taskDelivery = patched("project-taskflow-v1");
   const state: ProjectState = {
     git: {
       remoteUrl: input.gitUrl,
@@ -99,7 +106,11 @@ export async function projectWorkflow(
     contracts: new Map(cp?.contracts.map((c) => [c.contractId, c])),
     status: cp?.status ?? "RUNNING",
     ...(cp?.pauseReason ? { pauseReason: cp.pauseReason } : {}),
-    config: createConfig(input.config),
+    config: createConfig(taskDelivery ? input.config : {
+      ...input.config,
+      maxParallel: input.config?.maxParallel ?? 3,
+      maxWorktrees: input.config?.maxWorktrees ?? (input.config?.maxParallel ?? 3) + 2,
+    }),
   };
   const act = proxyActivities<ProjectActivities>({
     startToCloseTimeout: "2m",
@@ -410,7 +421,21 @@ export async function projectWorkflow(
     }
   }
   async function finish(event: Completion): Promise<void> {
-    const { task, result, worktree } = event;
+    const { task, worktree } = event;
+    let result = event.result;
+    let retainedWorktree: WorktreeState | null = null;
+    if (taskDelivery && event.prepared) {
+      const completedAt = timestamp();
+      await maintain(async () => {
+        const outcome = await act.collectTaskRun({
+          prepared: event.prepared!, timestamp: completedAt,
+          ...(event.record ? { record: event.record } : {}),
+          ...(event.result.error ? { error: event.result.error } : {}),
+        });
+        result = outcome;
+        retainedWorktree = outcome.retainedWorktree;
+      });
+    }
     const evidence: Evidence[] = result.evidence.map((e, index) => ({
       id: `${worktree.id}-${index}`,
       taskId: task.id,
@@ -455,32 +480,34 @@ export async function projectWorkflow(
           ...contract.evidence.filter((e) => !refs.some((r) => r.id === e.id)),
           ...refs,
         ].slice(-state.config.evidenceRetention);
-      await act.releaseWorktree({
+      if (!taskDelivery) await act.releaseWorktree({
         projectId: repository.projectId,
         taskId: task.id,
         worktreeId: worktree.id,
       });
     });
-    state.git.worktrees.delete(worktree.id);
+    if (retainedWorktree) state.git.worktrees.set(worktree.id, retainedWorktree);
+    else state.git.worktrees.delete(worktree.id);
     activeTasks.delete(task.id);
   }
   async function dispatch(tasks: Task[]): Promise<void> {
     const assigned = await Promise.all(
       tasks.map(async (task) => {
         activeTasks.set(task.id, task);
-        const leaseId = `wt-${++sequence}-${uuidv4()}`;
+        const leaseId = `${taskDelivery ? "task" : "wt"}-${++sequence}-${uuidv4()}`;
         try {
-          const worktree = await act.assignWorktree({
+          const run = taskDelivery ? await act.prepareTaskRun({ ...repository, task, runId: leaseId }) : undefined;
+          const worktree = run?.worktree ?? await act.assignWorktree({
             ...repository,
             taskId: task.id,
             leaseId,
             maxWorktrees: state.config.maxWorktrees,
           });
           state.git.worktrees.set(worktree.id, worktree);
-          return { task, worktree };
+          return { task, worktree, run };
         } catch (error) {
-          // A timed-out Activity may have created the lease before losing its result.
-          await maintain(() =>
+          // Only the legacy scheduler itself creates leases; Taskflow owns delivery workspaces.
+          if (!taskDelivery) await maintain(() =>
             act.releaseWorktree({
               projectId: repository.projectId,
               taskId: task.id,
@@ -508,7 +535,7 @@ export async function projectWorkflow(
     if (state.status !== "RUNNING") {
       await Promise.all(
         prepared.map(async ({ task, worktree }) => {
-          await maintain(() =>
+          if (!taskDelivery) await maintain(() =>
             act.releaseWorktree({
               projectId: repository.projectId,
               taskId: task.id,
@@ -523,26 +550,16 @@ export async function projectWorkflow(
       return;
     }
     // All startChild calls are issued before awaiting any child's start acknowledgment.
-    const starts = prepared.map(({ task, worktree }) => {
-      const workflowId = `task-${task.id}-${uuidv4()}`;
+    const starts = prepared.map(({ task, worktree, run }) => {
+      const workflowId = run?.input.runId ?? `task-${task.id}-${uuidv4()}`;
       children.set(task.id, {
         workflowId,
         startedAt: timestamp(),
         worktree,
         heartbeat: null,
       });
-      return startChild<OrchestratorWorkflow>("orchestratorWorkflow", {
-        args: [
-          {
-            projectId: repository.projectId,
-            taskId: task.id,
-            ...(task.contractId ? { contractId: task.contractId } : {}),
-            payload: task.payload,
-            worktree,
-            evidenceRef: `evidence:${worktree.id}`,
-          },
-        ],
-        taskQueue: "claith-orchestrator",
+      const options = {
+        taskQueue: taskDelivery ? workflowInfo().taskQueue : "claith-orchestrator",
         workflowId,
         workflowRunTimeout: state.config.taskTimeout,
         retry: {
@@ -554,13 +571,25 @@ export async function projectWorkflow(
         cancellationType:
           ChildWorkflowCancellationType.WAIT_CANCELLATION_COMPLETED,
         parentClosePolicy: ParentClosePolicy.REQUEST_CANCEL,
-      })
-        .then(async (handle) => {
+      };
+      const child = run ? startChild<TaskDeliveryWorkflow>("taskWorkflow", { ...options, args: [run.input] }) :
+        startChild<OrchestratorWorkflow>("orchestratorWorkflow", { ...options, args: [{
+          projectId: repository.projectId, taskId: task.id,
+          ...(task.contractId ? { contractId: task.contractId } : {}),
+          payload: task.payload, worktree, evidenceRef: `evidence:${worktree.id}`,
+        }] });
+      return child.then(async (handle) => {
           state.runningChildren.set(task.id, handle);
           if (force) await cancelChild(handle.workflowId);
           return handle.result();
         })
         .then((result) => {
+          if (result && "execution" in result) {
+            if (!run) throw new Error("Invalid legacy child result");
+            events.push({ task, worktree, prepared: run, record: result, result: { success: false, evidence: [] } });
+            return;
+          }
+          if (run) throw new Error("Invalid task workflow result");
           if (
             !result ||
             typeof result.success !== "boolean" ||
@@ -594,6 +623,7 @@ export async function projectWorkflow(
           events.push({
             task,
             worktree,
+            ...(run ? { prepared: run } : {}),
             result: { success: false, evidence: [], error: text(error) },
           });
         });
@@ -642,7 +672,8 @@ export async function projectWorkflow(
           const ready = state.backlog
             .filter((t) => t.dependsOn.every((d) => state.completed.has(d)))
             .sort(compareTasks)
-            .slice(0, Math.max(0, state.config.maxParallel - activeTasks.size));
+            .slice(0, Math.max(0, Math.min(state.config.maxParallel - activeTasks.size,
+              taskDelivery ? state.config.maxWorktrees - state.git.worktrees.size : Infinity)));
           if (ready.length) {
             const ids = new Set(ready.map((t) => t.id));
             state.backlog = state.backlog.filter((t) => !ids.has(t.id));

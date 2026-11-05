@@ -1,8 +1,6 @@
-export {
-  projectWorkflow,
-  orchestratorWorkflow,
-  readProjectEvidence,
-} from "../workflows/index.js";
+export { projectWorkflow } from "../workflows/projectWorkflow.js";
+export { orchestratorWorkflow } from "../workflows/orchestratorWorkflow.js";
+export { readProjectEvidence } from "../workflows/readProjectEvidence.js";
 
 import {
   ActivityCancellationType,
