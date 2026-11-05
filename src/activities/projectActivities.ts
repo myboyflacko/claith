@@ -1,18 +1,24 @@
 import { ApplicationFailure, Context } from "@temporalio/activity";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, access } from "node:fs/promises";
+import { mkdir, readFile, access, realpath } from "node:fs/promises";
 import { join, resolve, relative, sep } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import { withOwnership } from "../workspace/ownership.js";
 import { runCommand } from "../workspace/process.js";
-import { readJson, writeJson } from "../workspace/storage.js";
+import { projectId, readJson, writeJson } from "../workspace/storage.js";
+import { runDirectory } from "../workspace/git.js";
+import { loadConfiguration } from "../configuration.js";
+import { executionConfigurationSchema } from "../domain/configuration.js";
+import { contractSchema } from "../domain/contracts.js";
+import { collectTaskRun } from "./taskRunActivities.js";
 import type {
   AssignWorktreeInput,
   Evidence,
   EvidencePage,
   ProjectActivities,
   ProjectRepository,
+  PreparedTaskRun,
   WorktreeState,
 } from "../workflows/types.js";
 
@@ -170,8 +176,8 @@ export function createProjectActivities(
       invalid("Project identity belongs to another repository configuration");
     if (!prior) await writeJson(manifestPath, input);
     const repo = join(dir, "repo");
-    if (!(await exists(join(repo, ".git")))) {
-      await git(dir, input, "clone", "--no-checkout", "--", input.gitUrl, repo);
+    if (!(await exists(join(repo, ".git"))) && !(await exists(join(repo, "HEAD")))) {
+      await git(dir, input, "clone", "--bare", "--", input.gitUrl, repo);
     }
     if (
       (await git(repo, input, "remote", "get-url", "origin")) !== input.gitUrl
@@ -284,6 +290,44 @@ export function createProjectActivities(
     }
   }
   return {
+    prepareTaskRun: input => guarded(input.projectId, async dir => {
+      const payload = z.object({ contract: contractSchema, configuration: executionConfigurationSchema.optional() }).strict().safeParse(input.task.payload);
+      if (!payload.success || payload.data.contract.taskId !== input.task.id) invalid("Task payload requires a matching task contract and valid execution configuration");
+      if (input.defaultBranch !== "dev") invalid("taskWorkflow currently supports delivery to dev only");
+      runDirectory(root, input.runId);
+      const snapshot = join(dir, "dispatches", `${input.runId}.json`);
+      const prior = await readJson<{ request: typeof input; prepared: PreparedTaskRun }>(snapshot);
+      if (prior) {
+        if (JSON.stringify(prior.request) !== JSON.stringify(input)) invalid("Run identity belongs to another task dispatch");
+        return prior.prepared;
+      }
+      const configuration = payload.data!.configuration ?? await loadConfiguration(root);
+      const repo = await repository(dir, input);
+      if ((await git(repo, input, "rev-parse", "--is-bare-repository")) !== "true") invalid("Task delivery requires a bare managed clone; reconcile the existing non-bare project before dispatch");
+      if (input.sshKeyRef) {
+        const env = await environment(input);
+        await git(repo, input, "config", "core.sshCommand", env.GIT_SSH_COMMAND!);
+      }
+      const common = await realpath(resolve(repo, await git(repo, input, "rev-parse", "--git-common-dir")));
+      const lock = join(root, "sessions", ".integration-locks", projectId(common));
+      await mkdir(lock, { recursive: true });
+      return withOwnership(lock, async () => {
+        await git(repo, input, "fetch", "--no-tags", "origin", "+refs/heads/dev:refs/remotes/origin/dev");
+        const startCommit = await git(repo, input, "rev-parse", "refs/remotes/origin/dev");
+        const local = await git(repo, input, "rev-parse", "refs/heads/dev");
+        if (local !== startCommit) {
+          await git(repo, input, "merge-base", "--is-ancestor", local, startCommit);
+          await git(repo, input, "update-ref", "refs/heads/dev", startCommit, local);
+        }
+        const prepared: PreparedTaskRun = {
+          input: { runId: input.runId, project: repo, startCommit, contract: payload.data!.contract, configuration },
+          worktree: { id: input.runId, taskId: input.task.id, path: join(root, "worktrees", projectId(repo), input.runId), branch: `feature/claith-${input.runId}`, baseCommit: startCommit, status: "assigned" },
+        };
+        await writeJson(snapshot, { request: input, prepared });
+        return prepared;
+      });
+    }),
+    collectTaskRun: input => collectTaskRun(root, input),
     createWorktree: assign,
     assignWorktree: assign,
     releaseWorktree: (input) =>

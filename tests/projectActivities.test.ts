@@ -18,6 +18,7 @@ import {
   DEFAULT_PROJECT_CONFIG,
 } from "../src/workflows/config.js";
 import { projectWorkflowId } from "../src/runtime/projectClient.js";
+import { taskInput } from "./fixtures/task.js";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -219,6 +220,26 @@ describe("project activities", { timeout: 30000 }, () => {
     await unlink(orphan);
     expect(await act.assignWorktree(input)).toEqual(worktree);
   });
+  it("snapshots real Taskflow inputs against current dev without creating a second worktree", async () => {
+    const { act, input, source } = await fixture();
+    const execution = taskInput();
+    const task = { id: execution.contract.taskId, dependsOn: [], payload: { contract: execution.contract, configuration: execution.configuration }, createdAt: "2026-01-01T00:00:00.000Z" };
+    const request = { ...input, task, runId: "dispatch-one" };
+    const first = await act.prepareTaskRun(request);
+    expect(first.input.contract).toEqual(execution.contract);
+    expect(first.input.configuration).toEqual(execution.configuration);
+    expect(first.input.startCommit).toBe(await git(source, "rev-parse", "HEAD"));
+    expect(await git(first.input.project, "rev-parse", "--is-bare-repository")).toBe("true");
+    await expect(access(first.worktree.path)).rejects.toThrow();
+    await git(source, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-m", "next");
+    expect(await act.prepareTaskRun(request)).toEqual(first);
+    const next = await act.prepareTaskRun({ ...request, runId: "dispatch-two" });
+    expect(next.input.startCommit).toBe(await git(source, "rev-parse", "HEAD"));
+    expect(next.input.startCommit).not.toBe(first.input.startCommit);
+    await expect(act.prepareTaskRun({ ...request, task: { ...task, priority: 2 } })).rejects.toThrow("another task dispatch");
+    await expect(act.prepareTaskRun({ ...request, runId: "bad", task: { ...task, id: "different" } })).rejects.toThrow("matching task contract");
+    await expect(act.prepareTaskRun({ ...request, runId: "main", defaultBranch: "main" })).rejects.toThrow("dev only");
+  });
   it("loads validated contract plans and reports nonretryable contract failures", async () => {
     const { act, root, input } = await fixture();
     const contractRef = join(root, "contract.json");
@@ -250,13 +271,15 @@ describe("project activities", { timeout: 30000 }, () => {
     ).rejects.toMatchObject({ type: "Contract", nonRetryable: true });
   });
   it("validates configuration and uses real stable repository hashes", () => {
+    expect(createConfig().maxParallel).toBe(1);
+    expect(createConfig().maxWorktrees).toBe(3);
     expect(createConfig({ maxParallel: 6 }).maxWorktrees).toBe(8);
     for (const maxParallel of [0, -1, 0.5, Infinity, NaN])
       expect(() => createConfig({ maxParallel })).toThrow(
         "Invalid project configuration",
       );
     expect(() => createConfig({ maxParallel: 3, maxWorktrees: 2 })).toThrow();
-    expect(createConfig({ maxParallel: 4 }, createConfig()).maxParallel).toBe(
+    expect(createConfig({ maxParallel: 4, maxWorktrees: 6 }, createConfig()).maxParallel).toBe(
       4,
     );
     const config = createConfig();

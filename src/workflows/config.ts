@@ -2,8 +2,8 @@ import { ApplicationFailure } from "@temporalio/workflow";
 import type { ProjectConfig } from "./types.js";
 
 export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
-  maxParallel: 3,
-  maxWorktrees: 5,
+  maxParallel: 1,
+  maxWorktrees: 3,
   taskRetryPolicy: {
     maximumAttempts: 1,
     initialIntervalMs: 5000,
@@ -26,7 +26,7 @@ export function createConfig(
     maxWorktrees:
       input.maxWorktrees ??
       previous?.maxWorktrees ??
-      (input.maxParallel ?? 3) + 2,
+      (input.maxParallel ?? DEFAULT_PROJECT_CONFIG.maxParallel) + 2,
     taskRetryPolicy: {
       ...(previous?.taskRetryPolicy ?? DEFAULT_PROJECT_CONFIG.taskRetryPolicy),
       ...input.taskRetryPolicy,

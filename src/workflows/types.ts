@@ -1,4 +1,6 @@
 import type { ChildWorkflowHandle } from "@temporalio/workflow";
+import type { ExecutionConfiguration } from "../domain/configuration.js";
+import type { RunInput, RunRecord, TaskContract } from "../domain/contracts.js";
 
 export interface ProjectConfig {
   maxParallel: number;
@@ -21,6 +23,20 @@ export interface ProjectWorkflowInput {
   config?: Partial<ProjectConfig>;
   checkpoint?: ProjectCheckpoint;
 }
+export interface TaskPayload {
+  contract: TaskContract;
+  /** If omitted, snapshot the worker's configured execution profiles at dispatch time. */
+  configuration?: ExecutionConfiguration;
+}
+export interface PreparedTaskRun {
+  input: RunInput;
+  /** Expected candidate workspace; only taskWorkflow creates/cleans it. */
+  worktree: WorktreeState;
+}
+export interface TaskRunOutcome extends ChildWorkflowResult {
+  retainedWorktree: WorktreeState | null;
+}
+export type TaskDeliveryWorkflow = (input: RunInput) => Promise<RunRecord>;
 export interface Task {
   id: string;
   contractId?: string;
@@ -89,7 +105,7 @@ export interface ProjectState {
     worktrees: Map<string, WorktreeState>;
   };
   backlog: Task[];
-  runningChildren: Map<string, ChildWorkflowHandle<OrchestratorWorkflow>>;
+  runningChildren: Map<string, ChildWorkflowHandle<OrchestratorWorkflow | TaskDeliveryWorkflow>>;
   completed: Set<string>;
   failed: Map<string, string>;
   evidence: EvidenceRef[];
@@ -182,6 +198,8 @@ export interface EvidencePage {
   hasMore: boolean;
 }
 export interface ProjectActivities {
+  prepareTaskRun(input: ProjectRepository & { task: Task; runId: string }): Promise<PreparedTaskRun>;
+  collectTaskRun(input: { prepared: PreparedTaskRun; timestamp: string; record?: RunRecord; error?: string }): Promise<TaskRunOutcome>;
   createWorktree(input: AssignWorktreeInput): Promise<WorktreeState>;
   assignWorktree(input: AssignWorktreeInput): Promise<WorktreeState>;
   releaseWorktree(input: ReleaseWorktreeInput): Promise<void>;
