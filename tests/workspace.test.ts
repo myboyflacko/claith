@@ -1,5 +1,12 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import {
+  mkdtemp,
+  mkdir,
+  realpath,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
+import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import type { AttemptInput, ReviewInput } from "../src/domain/contracts.js";
@@ -10,7 +17,10 @@ import {
   runSetup,
 } from "../src/workspace/git.js";
 import { writeJson, readJson, projectId } from "../src/workspace/storage.js";
-import { withOwnership } from "../src/workspace/ownership.js";
+import {
+  withOwnership,
+  withQueuedOwnership,
+} from "../src/workspace/ownership.js";
 import { runCommand } from "../src/workspace/process.js";
 import {
   projectFixture,
@@ -28,6 +38,48 @@ beforeEach(async () => {
 afterEach(async () => {
   vi.unstubAllEnvs();
   await rm(temp, { recursive: true, force: true });
+});
+it("does not create a task worktree when preparation is cancelled while waiting for repository ownership", async () => {
+  const { root, input } = fixture;
+  const common = await realpath(
+    resolve(project, await git(project, "rev-parse", "--git-common-dir")),
+  );
+  const directory = join(
+    root,
+    "sessions",
+    ".integration-locks",
+    projectId(common),
+  );
+  await mkdir(directory, { recursive: true });
+  let release!: () => void, started!: () => void;
+  const hold = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const ready = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  const owner = withQueuedOwnership(directory, async () => {
+    started();
+    await hold;
+  });
+  await ready;
+  const controller = new AbortController();
+  const preparing = workspaceActivities(root, controller.signal).prepare(input);
+  const rejected = expect(preparing).rejects.toThrow(
+    "cancelled before preparation",
+  );
+  try {
+    controller.abort(new Error("cancelled before preparation"));
+    release();
+    await rejected;
+    await owner;
+    expect(await git(project, "worktree", "list", "--porcelain")).not.toContain(
+      `feature/claith-${input.runId}`,
+    );
+  } finally {
+    release();
+    await Promise.allSettled([owner, preparing]);
+  }
 });
 async function candidate(plan = verificationPlan()) {
   const { root, input } = fixture;

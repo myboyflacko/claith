@@ -32,8 +32,7 @@ export async function runRuntime(
             new URL(`./workflows${extension}`, import.meta.url),
           ),
           activities,
-          maxConcurrentActivityTaskExecutions:
-            taskQueue === settings.taskQueue ? 1 : 8,
+          maxConcurrentActivityTaskExecutions: 8,
           shutdownGraceTime: "30s",
           shutdownForceTime: "35s",
         }),

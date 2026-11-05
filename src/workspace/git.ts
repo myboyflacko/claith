@@ -26,7 +26,7 @@ import {
   verificationPlanSchema,
 } from "../domain/contracts.js";
 import { runCommand } from "./process.js";
-import { withOwnership } from "./ownership.js";
+import { withOwnership, withQueuedOwnership } from "./ownership.js";
 import { projectId, readJson, writeJson } from "./storage.js";
 const exec = promisify(execFile);
 export async function git(cwd: string, ...args: string[]): Promise<string> {
@@ -92,12 +92,14 @@ async function worktreeExists(project: string, path: string): Promise<boolean> {
 async function ensureWorktree(
   input: RunInput,
   workspace: Workspace,
+  signal?: AbortSignal,
 ): Promise<void> {
   if (!(await worktreeExists(input.project, workspace.path))) {
     if (await branchExists(input.project, workspace.branch))
       throw new Error(
         "Branch exists without recorded worktree; reconcile preserved state",
       );
+    signal?.throwIfAborted();
     await git(
       input.project,
       "worktree",
@@ -260,6 +262,7 @@ export function workspaceActivities(
     input: RunInput,
     action: () => Promise<T>,
   ): Promise<T> {
+    signal?.throwIfAborted();
     const repository = await realpath(
       resolve(
         input.project,
@@ -276,7 +279,10 @@ export function workspaceActivities(
       recursive: true,
     });
     await mkdir(directory, { recursive: true });
-    return withOwnership(directory, action);
+    return withQueuedOwnership(directory, () => {
+      signal?.throwIfAborted();
+      return action();
+    });
   }
   async function guarded<T>(
     input: WorkInput,
@@ -324,6 +330,7 @@ export function workspaceActivities(
           if (!original)
             await writeJson(join(artifactDir, "input.json"), input);
           await requireBase(input);
+          signal?.throwIfAborted();
           // Reject dirty development worktrees, including a dev checkout outside the supplied path.
           for (const block of (
             await git(input.project, "worktree", "list", "--porcelain")
@@ -346,7 +353,7 @@ export function workspaceActivities(
             base: input.startCommit,
             artifactDir,
           };
-          await ensureWorktree(input, workspace);
+          await ensureWorktree(input, workspace, signal);
           return workspace;
         });
       }),
@@ -488,12 +495,16 @@ export function workspaceActivities(
             integration = prior;
             await assertRevision({ path }, prior.revision);
           } else {
-            await ensureWorktree(input, {
-              path,
-              branch,
-              base: input.startCommit,
-              artifactDir: input.workspace.artifactDir,
-            });
+            await ensureWorktree(
+              input,
+              {
+                path,
+                branch,
+                base: input.startCommit,
+                artifactDir: input.workspace.artifactDir,
+              },
+              signal,
+            );
             const head = await git(path, "rev-parse", "HEAD");
             if (head === input.startCommit)
               await git(

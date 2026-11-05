@@ -29,6 +29,7 @@ export interface TaskPayload {
   configuration?: ExecutionConfiguration;
 }
 export interface PreparedTaskRun {
+  projectId: string;
   input: RunInput;
   /** Expected candidate workspace; only taskWorkflow creates/cleans it. */
   worktree: WorktreeState;
@@ -105,7 +106,10 @@ export interface ProjectState {
     worktrees: Map<string, WorktreeState>;
   };
   backlog: Task[];
-  runningChildren: Map<string, ChildWorkflowHandle<OrchestratorWorkflow | TaskDeliveryWorkflow>>;
+  runningChildren: Map<
+    string,
+    ChildWorkflowHandle<OrchestratorWorkflow | TaskDeliveryWorkflow>
+  >;
   completed: Set<string>;
   failed: Map<string, string>;
   evidence: EvidenceRef[];
@@ -198,8 +202,25 @@ export interface EvidencePage {
   hasMore: boolean;
 }
 export interface ProjectActivities {
-  prepareTaskRun(input: ProjectRepository & { task: Task; runId: string }): Promise<PreparedTaskRun>;
-  collectTaskRun(input: { prepared: PreparedTaskRun; timestamp: string; record?: RunRecord; error?: string }): Promise<TaskRunOutcome>;
+  prepareTaskRun(
+    input: ProjectRepository & {
+      task: Task;
+      runId: string;
+      maxWorktrees: number;
+    },
+  ): Promise<PreparedTaskRun>;
+  reconcileTaskRuns(input: ProjectRepository): Promise<WorktreeState[]>;
+  abandonTaskRun(input: { projectId: string; runId: string }): Promise<void>;
+  releaseTaskRunAllocation(input: {
+    projectId: string;
+    runId: string;
+  }): Promise<void>;
+  collectTaskRun(input: {
+    prepared: PreparedTaskRun;
+    timestamp: string;
+    record?: RunRecord;
+    error?: string;
+  }): Promise<TaskRunOutcome>;
   createWorktree(input: AssignWorktreeInput): Promise<WorktreeState>;
   assignWorktree(input: AssignWorktreeInput): Promise<WorktreeState>;
   releaseWorktree(input: ReleaseWorktreeInput): Promise<void>;

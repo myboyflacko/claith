@@ -1,7 +1,7 @@
 import { hostname } from "node:os";
 import { readFile, readdir, unlink, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 interface Owner {
   host: string;
@@ -70,6 +70,26 @@ async function processStart(pid: number): Promise<string | null> {
     );
   }
 }
+const queuedOwners = new Map<string, Promise<unknown>>();
+
+/** Serialize this worker's writers; the filesystem owner still guards other processes. */
+export async function withQueuedOwnership<T>(
+  directory: string,
+  action: () => Promise<T>,
+): Promise<T> {
+  const key = resolve(directory);
+  const previous = queuedOwners.get(key) ?? Promise.resolve();
+  const operation = previous
+    .catch(() => undefined)
+    .then(() => withOwnership(directory, action));
+  queuedOwners.set(key, operation);
+  try {
+    return await operation;
+  } finally {
+    if (queuedOwners.get(key) === operation) queuedOwners.delete(key);
+  }
+}
+
 export async function withOwnership<T>(
   directory: string,
   action: () => Promise<T>,

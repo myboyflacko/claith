@@ -1,5 +1,6 @@
 import {
   mkdtemp,
+  mkdir,
   rm,
   writeFile,
   access,
@@ -11,6 +12,7 @@ import { join, dirname } from "node:path";
 import { tmpdir, hostname } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 import { createProjectActivities } from "../src/activities/projectActivities.js";
+import { collectTaskRun } from "../src/activities/taskRunActivities.js";
 import { git } from "../src/workspace/git.js";
 import type { AssignWorktreeInput, Evidence } from "../src/workflows/types.js";
 import {
@@ -18,7 +20,7 @@ import {
   DEFAULT_PROJECT_CONFIG,
 } from "../src/workflows/config.js";
 import { projectWorkflowId } from "../src/runtime/projectClient.js";
-import { taskInput } from "./fixtures/task.js";
+import { taskInput, completedTaskRun } from "./fixtures/task.js";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -223,22 +225,213 @@ describe("project activities", { timeout: 30000 }, () => {
   it("snapshots real Taskflow inputs against current dev without creating a second worktree", async () => {
     const { act, input, source } = await fixture();
     const execution = taskInput();
-    const task = { id: execution.contract.taskId, dependsOn: [], payload: { contract: execution.contract, configuration: execution.configuration }, createdAt: "2026-01-01T00:00:00.000Z" };
+    const task = {
+      id: execution.contract.taskId,
+      dependsOn: [],
+      payload: {
+        contract: execution.contract,
+        configuration: execution.configuration,
+      },
+      createdAt: "2026-01-01T00:00:00.000Z",
+    };
     const request = { ...input, task, runId: "dispatch-one" };
     const first = await act.prepareTaskRun(request);
     expect(first.input.contract).toEqual(execution.contract);
     expect(first.input.configuration).toEqual(execution.configuration);
-    expect(first.input.startCommit).toBe(await git(source, "rev-parse", "HEAD"));
-    expect(await git(first.input.project, "rev-parse", "--is-bare-repository")).toBe("true");
+    expect(first.input.startCommit).toBe(
+      await git(source, "rev-parse", "HEAD"),
+    );
+    expect(
+      await git(first.input.project, "rev-parse", "--is-bare-repository"),
+    ).toBe("true");
     await expect(access(first.worktree.path)).rejects.toThrow();
-    await git(source, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-m", "next");
+    await git(
+      source,
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@example.com",
+      "commit",
+      "--allow-empty",
+      "-m",
+      "next",
+    );
     expect(await act.prepareTaskRun(request)).toEqual(first);
-    const next = await act.prepareTaskRun({ ...request, runId: "dispatch-two" });
+    const next = await act.prepareTaskRun({
+      ...request,
+      runId: "dispatch-two",
+    });
     expect(next.input.startCommit).toBe(await git(source, "rev-parse", "HEAD"));
     expect(next.input.startCommit).not.toBe(first.input.startCommit);
-    await expect(act.prepareTaskRun({ ...request, task: { ...task, priority: 2 } })).rejects.toThrow("another task dispatch");
-    await expect(act.prepareTaskRun({ ...request, runId: "bad", task: { ...task, id: "different" } })).rejects.toThrow("matching task contract");
-    await expect(act.prepareTaskRun({ ...request, runId: "main", defaultBranch: "main" })).rejects.toThrow("dev only");
+    await expect(
+      act.prepareTaskRun({ ...request, task: { ...task, priority: 2 } }),
+    ).rejects.toThrow("another task dispatch");
+    await expect(
+      act.prepareTaskRun({
+        ...request,
+        runId: "bad",
+        task: { ...task, id: "different" },
+      }),
+    ).rejects.toThrow("matching task contract");
+    await expect(
+      act.prepareTaskRun({ ...request, runId: "main", defaultBranch: "main" }),
+    ).rejects.toThrow("dev only");
+  });
+  it("reconciles durable candidate allocations across fresh adapters and releases only unstarted dispatches", async () => {
+    const { root, act, input } = await fixture();
+    const task = {
+      id: taskInput().contract.taskId,
+      dependsOn: [],
+      createdAt: "2026-01-01T00:00:00.000Z",
+      payload: {
+        contract: taskInput().contract,
+        configuration: taskInput().configuration,
+      },
+    };
+    const request = { ...input, maxWorktrees: 1, task, runId: "durable-one" };
+    const prepared = await act.prepareTaskRun(request);
+    await mkdir(prepared.worktree.path, { recursive: true });
+    await writeFile(join(prepared.worktree.path, "preserved"), "candidate");
+    const cancelled = completedTaskRun(prepared.input);
+    cancelled.execution.workspace!.path = prepared.worktree.path;
+    cancelled.execution.status = "cancelled";
+    cancelled.execution.cleaned = false;
+    expect(
+      (
+        await act.collectTaskRun({
+          prepared,
+          timestamp: task.createdAt,
+          record: cancelled,
+        })
+      ).retainedWorktree?.id,
+    ).toBe(prepared.worktree.id);
+    const restarted = createProjectActivities(root);
+    expect(await restarted.reconcileTaskRuns(input)).toMatchObject([
+      { id: "durable-one", status: "error" },
+    ]);
+    await expect(
+      restarted.prepareTaskRun({ ...request, runId: "durable-two" }),
+    ).rejects.toThrow("capacity is exhausted");
+    await expect(
+      restarted.abandonTaskRun({
+        projectId: input.projectId,
+        runId: "durable-one",
+      }),
+    ).rejects.toThrow("finalized task dispatch");
+    await access(join(prepared.worktree.path, "preserved"));
+    await rm(prepared.worktree.path, { recursive: true });
+    cancelled.execution.cleaned = true;
+    const terminal = await restarted.collectTaskRun({
+      prepared,
+      timestamp: task.createdAt,
+      record: cancelled,
+    });
+    await restarted.storeEvidence({
+      projectId: input.projectId,
+      evidence: terminal.evidence,
+    });
+    await restarted.releaseTaskRunAllocation({
+      projectId: input.projectId,
+      runId: "durable-one",
+    });
+    const unstarted = await restarted.prepareTaskRun({
+      ...request,
+      runId: "durable-two",
+    });
+    expect(
+      await createProjectActivities(root).reconcileTaskRuns(input),
+    ).toMatchObject([{ id: unstarted.worktree.id }]);
+    await restarted.abandonTaskRun({
+      projectId: input.projectId,
+      runId: unstarted.input.runId,
+    });
+    expect(await restarted.reconcileTaskRuns(input)).toEqual([]);
+    await expect(
+      restarted.prepareTaskRun({ ...request, runId: "durable-two" }),
+    ).rejects.toThrow("already been released");
+    const uncertain = await restarted.prepareTaskRun({
+      ...request,
+      runId: "durable-uncertain",
+    });
+    expect(
+      (
+        await restarted.collectTaskRun({
+          prepared: uncertain,
+          timestamp: task.createdAt,
+          error: "Workflow timed out",
+        })
+      ).retainedWorktree,
+    ).not.toBeNull();
+    expect(
+      await createProjectActivities(root).reconcileTaskRuns(input),
+    ).toMatchObject([{ id: uncertain.input.runId }]);
+    await expect(
+      restarted.releaseTaskRunAllocation({
+        projectId: input.projectId,
+        runId: uncertain.input.runId,
+      }),
+    ).rejects.toThrow("Only finalized");
+  });
+  it("projects only verified delivery and preserves failed or uncertain task workspaces", async () => {
+    const { root } = await fixture();
+    const act = {
+      collectTaskRun: (input: Parameters<typeof collectTaskRun>[1]) =>
+        collectTaskRun(root, input),
+    };
+    const input = taskInput();
+    const path = join(root, "owned-candidate");
+    const prepared = {
+      projectId: "project",
+      input,
+      worktree: {
+        id: input.runId,
+        taskId: input.contract.taskId,
+        path,
+        branch: `feature/claith-${input.runId}`,
+        baseCommit: input.startCommit,
+        status: "assigned" as const,
+      },
+    };
+    const record = completedTaskRun(input);
+    record.execution.workspace!.path = path;
+    const request = { prepared, timestamp: "2026-01-01T00:00:00.000Z", record };
+    const success = await act.collectTaskRun(request);
+    expect(success.success).toBe(true);
+    expect(success.retainedWorktree).toBeNull();
+    expect(success.evidence.some((e) => e.type === "review")).toBe(true);
+    expect(success.evidence.filter((e) => e.type === "check")).toHaveLength(2);
+    const timedOutPreparation = structuredClone(record);
+    timedOutPreparation.execution.status = "cancelled";
+    timedOutPreparation.execution.workspace = null;
+    timedOutPreparation.execution.cleaned = false;
+    expect(
+      (await act.collectTaskRun({ ...request, record: timedOutPreparation }))
+        .retainedWorktree,
+    ).toMatchObject({ id: input.runId, status: "error" });
+    record.execution.pushed = false;
+    expect((await act.collectTaskRun(request)).error).toContain(
+      "verified delivery",
+    );
+    record.execution.pushed = true;
+    record.execution.attempts[0]!.review!.submission.revision = "c".repeat(40);
+    expect((await act.collectTaskRun(request)).success).toBe(false);
+    await mkdir(path);
+    await writeFile(join(path, "preserved"), "failed work");
+    const failed = await act.collectTaskRun({
+      prepared,
+      timestamp: request.timestamp,
+      error: "Task timed out",
+    });
+    expect(failed).toMatchObject({
+      success: false,
+      error: "Task timed out",
+      retainedWorktree: { path, status: "error" },
+    });
+    await access(join(path, "preserved"));
+    record.execution.attempts[0]!.review!.submission.revision = "b".repeat(40);
+    expect((await act.collectTaskRun(request)).error).toContain(
+      "worktrees remain",
+    );
   });
   it("loads validated contract plans and reports nonretryable contract failures", async () => {
     const { act, root, input } = await fixture();
@@ -279,9 +472,10 @@ describe("project activities", { timeout: 30000 }, () => {
         "Invalid project configuration",
       );
     expect(() => createConfig({ maxParallel: 3, maxWorktrees: 2 })).toThrow();
-    expect(createConfig({ maxParallel: 4, maxWorktrees: 6 }, createConfig()).maxParallel).toBe(
-      4,
-    );
+    expect(
+      createConfig({ maxParallel: 4, maxWorktrees: 6 }, createConfig())
+        .maxParallel,
+    ).toBe(4);
     const config = createConfig();
     config.taskRetryPolicy.maximumAttempts = 8;
     expect(DEFAULT_PROJECT_CONFIG.taskRetryPolicy.maximumAttempts).toBe(1);

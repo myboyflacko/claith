@@ -7,6 +7,7 @@ import type {
   VerificationPlan,
   ReviewInput,
   Review,
+  RunRecord,
 } from "../../src/domain/contracts.js";
 import { git } from "../../src/workspace/git.js";
 import { agentProfiles } from "./profiles.js";
@@ -72,4 +73,89 @@ export function acceptedReview(input: ReviewInput): Review {
 
 export function verificationPlan(): VerificationPlan {
   return { setup: [], checks: [{ id: "test", command: "test -f source.txt" }] };
+}
+
+export function completedTaskRun(input: RunInput): RunRecord {
+  const workspace = {
+    path: `/managed/${input.runId}`,
+    branch: `feature/claith-${input.runId}`,
+    base: input.startCommit,
+    artifactDir: "/artifacts",
+  };
+  const candidate = {
+    revision: "b".repeat(40),
+    diffRef: "/artifacts/diff.patch",
+    verificationPlan: verificationPlan(),
+  };
+  const checks = candidate.verificationPlan.checks.map((c) => ({
+    ...c,
+    exitCode: 0,
+    outputRef: "/artifacts/check.log",
+    revision: candidate.revision,
+    unchanged: true,
+  }));
+  const reviewInput = {
+    ...input,
+    workspace,
+    attempt: 0,
+    feedback: "",
+    candidate,
+    checks,
+  };
+  const integration = {
+    revision: "e".repeat(40),
+    path: workspace.path + "-integration-0",
+    branch: "integration",
+    verificationPlan: candidate.verificationPlan,
+    checks: checks.map((c) => ({ ...c, revision: "e".repeat(40) })),
+  };
+  return {
+    contract: input.contract,
+    execution: {
+      runId: input.runId,
+      project: input.project,
+      startCommit: input.startCommit,
+      configuration: input.configuration,
+      status: "completed",
+      stage: "done",
+      repairsUsed: 0,
+      repairBudget: input.configuration.runtime.maxRepairs,
+      blocked: null,
+      workspace,
+      sessions: [],
+      integration,
+      pushed: true,
+      cleaned: true,
+      attempts: [
+        {
+          attempt: 0,
+          implementerWorkflowId: `${input.runId}-implementer-0`,
+          reviewerWorkflowId: `${input.runId}-reviewer-0`,
+          integration,
+          result: {
+            candidate,
+            checks,
+            implementation: {
+              sessionId: "implementer",
+              submission: {
+                runId: input.runId,
+                taskId: input.contract.taskId,
+                version: input.contract.version,
+                attempt: 0,
+                revision: candidate.revision,
+                status: "submitted",
+                summary: "Done",
+                verificationPlan: candidate.verificationPlan,
+                evidence: [{ criterionId: "works", references: ["test"] }],
+              },
+            },
+          },
+          review: {
+            sessionId: "reviewer",
+            submission: acceptedReview(reviewInput),
+          },
+        },
+      ],
+    },
+  };
 }

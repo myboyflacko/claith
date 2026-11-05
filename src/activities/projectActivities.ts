@@ -1,17 +1,17 @@
 import { ApplicationFailure, Context } from "@temporalio/activity";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, access, realpath } from "node:fs/promises";
+import { mkdir, readFile, access, realpath, readdir } from "node:fs/promises";
 import { join, resolve, relative, sep } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
-import { withOwnership } from "../workspace/ownership.js";
+import { withQueuedOwnership } from "../workspace/ownership.js";
 import { runCommand } from "../workspace/process.js";
 import { projectId, readJson, writeJson } from "../workspace/storage.js";
 import { runDirectory } from "../workspace/git.js";
 import { loadConfiguration } from "../configuration.js";
 import { executionConfigurationSchema } from "../domain/configuration.js";
 import { contractSchema } from "../domain/contracts.js";
-import { collectTaskRun } from "./taskRunActivities.js";
+import { collectTaskRun, hasTaskWorkspace } from "./taskRunActivities.js";
 import type {
   AssignWorktreeInput,
   Evidence,
@@ -21,6 +21,12 @@ import type {
   PreparedTaskRun,
   WorktreeState,
 } from "../workflows/types.js";
+
+interface DispatchSnapshot {
+  request: Parameters<ProjectActivities["prepareTaskRun"]>[0];
+  prepared: PreparedTaskRun;
+  allocation: "reserved" | "retained" | "releasable" | "released";
+}
 
 const hash = (value: string) =>
   createHash("sha256").update(value).digest("hex");
@@ -68,7 +74,6 @@ export function createProjectActivities(
 ): ProjectActivities {
   const namespaceKey = hash(options.namespace ?? "default");
   const managedRoot = resolve(root, "projects", namespaceKey);
-  const queues = new Map<string, Promise<unknown>>();
   const directory = (projectId: string) => join(managedRoot, hash(projectId));
   async function guarded<T>(
     projectId: string,
@@ -77,16 +82,7 @@ export function createProjectActivities(
     const dir = directory(projectId);
     const lock = join(dir, "lock");
     await mkdir(lock, { recursive: true });
-    const prior = queues.get(projectId) ?? Promise.resolve();
-    const operation = prior
-      .catch(() => undefined)
-      .then(() => withOwnership(lock, () => action(dir)));
-    queues.set(projectId, operation);
-    try {
-      return await operation;
-    } finally {
-      if (queues.get(projectId) === operation) queues.delete(projectId);
-    }
+    return withQueuedOwnership(lock, () => action(dir));
   }
   async function environment(
     input: Pick<ProjectRepository, "sshKeyRef">,
@@ -176,7 +172,10 @@ export function createProjectActivities(
       invalid("Project identity belongs to another repository configuration");
     if (!prior) await writeJson(manifestPath, input);
     const repo = join(dir, "repo");
-    if (!(await exists(join(repo, ".git"))) && !(await exists(join(repo, "HEAD")))) {
+    if (
+      !(await exists(join(repo, ".git"))) &&
+      !(await exists(join(repo, "HEAD")))
+    ) {
       await git(dir, input, "clone", "--bare", "--", input.gitUrl, repo);
     }
     if (
@@ -289,45 +288,205 @@ export function createProjectActivities(
       db.close();
     }
   }
-  return {
-    prepareTaskRun: input => guarded(input.projectId, async dir => {
-      const payload = z.object({ contract: contractSchema, configuration: executionConfigurationSchema.optional() }).strict().safeParse(input.task.payload);
-      if (!payload.success || payload.data.contract.taskId !== input.task.id) invalid("Task payload requires a matching task contract and valid execution configuration");
-      if (input.defaultBranch !== "dev") invalid("taskWorkflow currently supports delivery to dev only");
-      runDirectory(root, input.runId);
-      const snapshot = join(dir, "dispatches", `${input.runId}.json`);
-      const prior = await readJson<{ request: typeof input; prepared: PreparedTaskRun }>(snapshot);
-      if (prior) {
-        if (JSON.stringify(prior.request) !== JSON.stringify(input)) invalid("Run identity belongs to another task dispatch");
-        return prior.prepared;
-      }
-      const configuration = payload.data!.configuration ?? await loadConfiguration(root);
-      const repo = await repository(dir, input);
-      if ((await git(repo, input, "rev-parse", "--is-bare-repository")) !== "true") invalid("Task delivery requires a bare managed clone; reconcile the existing non-bare project before dispatch");
-      if (input.sshKeyRef) {
-        const env = await environment(input);
-        await git(repo, input, "config", "core.sshCommand", env.GIT_SSH_COMMAND!);
-      }
-      const common = await realpath(resolve(repo, await git(repo, input, "rev-parse", "--git-common-dir")));
-      const lock = join(root, "sessions", ".integration-locks", projectId(common));
-      await mkdir(lock, { recursive: true });
-      return withOwnership(lock, async () => {
-        await git(repo, input, "fetch", "--no-tags", "origin", "+refs/heads/dev:refs/remotes/origin/dev");
-        const startCommit = await git(repo, input, "rev-parse", "refs/remotes/origin/dev");
-        const local = await git(repo, input, "rev-parse", "refs/heads/dev");
-        if (local !== startCommit) {
-          await git(repo, input, "merge-base", "--is-ancestor", local, startCommit);
-          await git(repo, input, "update-ref", "refs/heads/dev", startCommit, local);
+  async function allocations(dir: string): Promise<WorktreeState[]> {
+    const dispatches = join(dir, "dispatches");
+    let names: string[];
+    try {
+      names = await readdir(dispatches);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw error;
+    }
+    const result: WorktreeState[] = [];
+    for (const name of names.filter((name) => name.endsWith(".json")).sort()) {
+      const path = join(dispatches, name);
+      const snapshot = await readJson<DispatchSnapshot>(path);
+      if (!snapshot) continue;
+      if (
+        snapshot.allocation !== "released" ||
+        (await hasTaskWorkspace(snapshot.prepared))
+      ) {
+        if (snapshot.allocation === "released") {
+          snapshot.allocation = "retained";
+          await writeJson(path, snapshot);
         }
-        const prepared: PreparedTaskRun = {
-          input: { runId: input.runId, project: repo, startCommit, contract: payload.data!.contract, configuration },
-          worktree: { id: input.runId, taskId: input.task.id, path: join(root, "worktrees", projectId(repo), input.runId), branch: `feature/claith-${input.runId}`, baseCommit: startCommit, status: "assigned" },
-        };
-        await writeJson(snapshot, { request: input, prepared });
-        return prepared;
-      });
-    }),
-    collectTaskRun: input => collectTaskRun(root, input),
+        result.push({ ...snapshot.prepared.worktree, status: "error" });
+      }
+    }
+    return result;
+  }
+  const dispatchPath = (dir: string, runId: string) => {
+    runDirectory(root, runId);
+    return join(dir, "dispatches", `${runId}.json`);
+  };
+  return {
+    reconcileTaskRuns: (input) => guarded(input.projectId, allocations),
+    abandonTaskRun: (input) =>
+      guarded(input.projectId, async (dir) => {
+        const path = dispatchPath(dir, input.runId);
+        const snapshot = await readJson<DispatchSnapshot>(path);
+        if (!snapshot || snapshot.allocation === "released") return;
+        if (snapshot.allocation !== "reserved")
+          invalid("Cannot abandon a finalized task dispatch");
+        if (await hasTaskWorkspace(snapshot.prepared))
+          invalid("Cannot abandon a dispatch whose owned workspace exists");
+        snapshot.allocation = "released";
+        await writeJson(path, snapshot);
+      }),
+    releaseTaskRunAllocation: (input) =>
+      guarded(input.projectId, async (dir) => {
+        const path = dispatchPath(dir, input.runId);
+        const snapshot = await readJson<DispatchSnapshot>(path);
+        if (
+          !snapshot ||
+          !["releasable", "released"].includes(snapshot.allocation)
+        )
+          invalid("Only finalized task allocations can be released");
+        if (await hasTaskWorkspace(snapshot!.prepared))
+          invalid("Cannot free capacity while owned task workspaces remain");
+        snapshot!.allocation = "released";
+        await writeJson(path, snapshot);
+      }),
+    prepareTaskRun: (input) =>
+      guarded(input.projectId, async (dir) => {
+        const payload = z
+          .object({
+            contract: contractSchema,
+            configuration: executionConfigurationSchema.optional(),
+          })
+          .strict()
+          .safeParse(input.task.payload);
+        if (!payload.success || payload.data.contract.taskId !== input.task.id)
+          invalid(
+            "Task payload requires a matching task contract and valid execution configuration",
+          );
+        if (input.defaultBranch !== "dev")
+          invalid("taskWorkflow currently supports delivery to dev only");
+        runDirectory(root, input.runId);
+        const snapshot = dispatchPath(dir, input.runId);
+        const prior = await readJson<DispatchSnapshot>(snapshot);
+        if (prior) {
+          if (JSON.stringify(prior.request) !== JSON.stringify(input))
+            invalid("Run identity belongs to another task dispatch");
+          if (prior.allocation === "released")
+            invalid("Task dispatch allocation has already been released");
+          return prior.prepared;
+        }
+        if (!Number.isInteger(input.maxWorktrees) || input.maxWorktrees < 1)
+          invalid("Invalid task workspace capacity");
+        if ((await allocations(dir)).length >= input.maxWorktrees)
+          invalid(
+            "Task workspace capacity is exhausted by active, retained or uncertain allocations",
+          );
+        const configuration =
+          payload.data!.configuration ?? (await loadConfiguration(root));
+        const repo = await repository(dir, input);
+        if (
+          (await git(repo, input, "rev-parse", "--is-bare-repository")) !==
+          "true"
+        )
+          invalid(
+            "Task delivery requires a bare managed clone; reconcile the existing non-bare project before dispatch",
+          );
+        if (input.sshKeyRef) {
+          const env = await environment(input);
+          await git(
+            repo,
+            input,
+            "config",
+            "core.sshCommand",
+            env.GIT_SSH_COMMAND!,
+          );
+        }
+        const common = await realpath(
+          resolve(
+            repo,
+            await git(repo, input, "rev-parse", "--git-common-dir"),
+          ),
+        );
+        const lock = join(
+          root,
+          "sessions",
+          ".integration-locks",
+          projectId(common),
+        );
+        await mkdir(lock, { recursive: true });
+        return withQueuedOwnership(lock, async () => {
+          await git(
+            repo,
+            input,
+            "fetch",
+            "--no-tags",
+            "origin",
+            "+refs/heads/dev:refs/remotes/origin/dev",
+          );
+          const startCommit = await git(
+            repo,
+            input,
+            "rev-parse",
+            "refs/remotes/origin/dev",
+          );
+          const local = await git(repo, input, "rev-parse", "refs/heads/dev");
+          if (local !== startCommit) {
+            await git(
+              repo,
+              input,
+              "merge-base",
+              "--is-ancestor",
+              local,
+              startCommit,
+            );
+            await git(
+              repo,
+              input,
+              "update-ref",
+              "refs/heads/dev",
+              startCommit,
+              local,
+            );
+          }
+          const prepared: PreparedTaskRun = {
+            projectId: input.projectId,
+            input: {
+              runId: input.runId,
+              project: repo,
+              startCommit,
+              contract: payload.data!.contract,
+              configuration,
+            },
+            worktree: {
+              id: input.runId,
+              taskId: input.task.id,
+              path: join(root, "worktrees", projectId(repo), input.runId),
+              branch: `feature/claith-${input.runId}`,
+              baseCommit: startCommit,
+              status: "assigned",
+            },
+          };
+          await writeJson(snapshot, {
+            request: input,
+            prepared,
+            allocation: "reserved",
+          } satisfies DispatchSnapshot);
+          return prepared;
+        });
+      }),
+    collectTaskRun: (input) =>
+      guarded(input.prepared.projectId, async (dir) => {
+        const path = dispatchPath(dir, input.prepared.input.runId);
+        const snapshot = await readJson<DispatchSnapshot>(path);
+        if (
+          !snapshot ||
+          JSON.stringify(snapshot.prepared) !== JSON.stringify(input.prepared)
+        )
+          invalid("Unknown task dispatch allocation");
+        const outcome = await collectTaskRun(root, input);
+        snapshot!.allocation = outcome.retainedWorktree
+          ? "retained"
+          : "releasable";
+        await writeJson(path, snapshot);
+        return outcome;
+      }),
     createWorktree: assign,
     assignWorktree: assign,
     releaseWorktree: (input) =>
