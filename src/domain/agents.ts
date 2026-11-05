@@ -1,4 +1,4 @@
-import type { Permission } from "../tools.js";
+import type { Permission } from "./tools.js";
 
 /** Shared agent definition, independent of workflows and session providers. */
 export interface AgentDefinition {

@@ -16,7 +16,7 @@
 | `src/settings.ts`                         | Central ~/.claith location                                                                                                     |
 | `src/configuration.ts`                    | config.toml and role-profile loading; non-overwriting explicit init                                                            |
 | `src/domain/`                             | Runtime/profile schemas, tool registry, minimal task contracts, verification plans, run records and activity interfaces        |
-| `src/domain/agents/`                      | Shared agent definition interfaces for Implementer, Reviewer and Planner, independent of runtime sessions                      |
+| `src/domain/agents.ts`                    | Shared agent definition interfaces for Implementer, Reviewer and Planner, independent of runtime sessions                      |
 | `src/runtime/`                            | Task delivery and role workflows, direct task/project clients, activities and concurrent native workers                        |
 | `src/workflows/`                          | Project scheduler dispatching real Taskflows, configurable concurrency (default one), signals/queries and replay compatibility |
 | `src/workflows/SPEC.md`                   | Project admission, Taskflow workspace ownership, delivery evidence and replay contracts                                        |

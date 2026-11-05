@@ -4,7 +4,7 @@ import type {
   Implementer,
   Planner,
   Reviewer,
-} from "../src/domain/agents/index.js";
+} from "../src/domain/agents.js";
 
 it("gives all agent roles the shared definition fields", () => {
   expectTypeOf<Implementer>().toExtend<AgentDefinition>();
