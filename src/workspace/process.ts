@@ -11,7 +11,12 @@ async function groupAlive(group: number): Promise<boolean> {
       const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
       if (fields[0] !== "Z" && Number(fields[2]) === group) return true;
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      if (
+        !["ENOENT", "ESRCH"].includes(
+          (error as NodeJS.ErrnoException).code ?? "",
+        )
+      )
+        throw error;
     }
   }
   return false;

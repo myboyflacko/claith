@@ -1,3 +1,9 @@
+export {
+  projectWorkflow,
+  orchestratorWorkflow,
+  readProjectEvidence,
+} from "../workflows/index.js";
+
 import {
   ActivityCancellationType,
   ApplicationFailure,

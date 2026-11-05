@@ -41,7 +41,12 @@ async function assertProcessGroupsStopped(directory: string): Promise<void> {
           `Previous subprocess group ${fields[2]} still has a live writer (${pid}); stop it before reconciliation`,
         );
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      if (
+        !["ENOENT", "ESRCH"].includes(
+          (error as NodeJS.ErrnoException).code ?? "",
+        )
+      )
+        throw error;
     }
   }
 }
@@ -55,7 +60,10 @@ async function processStart(pid: number): Promise<string | null> {
       stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19]
     );
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    if (
+      ["ENOENT", "ESRCH"].includes((error as NodeJS.ErrnoException).code ?? "")
+    )
+      return null;
     throw new Error(
       "Cannot establish that the previous workspace writer has stopped",
       { cause: error },
