@@ -1,7 +1,6 @@
 import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { Type } from "typebox";
-import { z } from "zod";
+import type { z } from "zod";
 import {
   createAgentSession,
   createExtensionRuntime,
@@ -19,6 +18,9 @@ import { rolePolicy, toolRegistry } from "../domain/tools.js";
 import type { Role } from "../configuration.js";
 import type { ExecutionAgentProfile } from "../domain/configuration.js";
 import { logEvent, readJson, writeJson } from "../workspace/storage.js";
+import { createSubmitImplementationTool } from "./tools/implementer/submitImplementation.js";
+import { createSubmitReviewTool } from "./tools/reviewer/submitReview.js";
+import { createSubmissionTool } from "./tools/shared/submission.js";
 
 export interface RoleSession {
   prompt(text: string): Promise<unknown>;
@@ -86,43 +88,19 @@ export async function runRole<T>(
   const profile = executionProfileSchema(request.role).parse(request.profile);
   if (request.signal?.aborted)
     throw new Error("Agent cancelled before dispatch");
-  let submission: T | null = null;
-  let failure = "No structured submission";
   const completionName = rolePolicy[request.role].completion;
-  const completion: ToolDefinition = {
-    name: completionName,
-    label: completionName,
-    description:
-      "Submit the structured result for this exact invocation. Invalid or stale submissions are rejected.",
-    parameters: Type.Object({
-      result: Type.Unsafe(
-        z.toJSONSchema(request.schema, { target: "draft-7" }),
-      ),
-    }),
-    execute: async (_id, parameters) => {
-      try {
-        if (submission) throw new Error("A result has already been submitted");
-        const result = request.schema.parse(
-          (parameters as { result: unknown }).result,
-        );
-        await request.validate(result);
-        submission = result;
-        return {
-          content: [{ type: "text", text: "Recorded. Finish your turn." }],
-          details: {},
-        };
-      } catch (error) {
-        failure = String(error);
-        return {
-          content: [{ type: "text", text: failure }],
-          details: {},
-          isError: true,
-        };
-      }
-    },
+  const completionOptions = {
+    schema: request.schema,
+    validate: (value: T) => request.validate(value),
   };
+  const completion =
+    request.role === "implementer"
+      ? createSubmitImplementationTool(completionOptions)
+      : request.role === "reviewer"
+        ? createSubmitReviewTool(completionOptions)
+        : createSubmissionTool(completionName, completionOptions);
   const definitions = new Map<string, ToolDefinition>();
-  for (const definition of [...(request.customTools ?? []), completion]) {
+  for (const definition of [...(request.customTools ?? []), completion.tool]) {
     if (toolRegistry.get(definition.name)?.source !== "custom")
       throw new Error(
         `Unregistered custom tool or Pi tool override: ${definition.name}`,
@@ -204,9 +182,9 @@ export async function runRole<T>(
   request.signal?.addEventListener("abort", abort, { once: true });
   try {
     await session.prompt(request.prompt);
-    if (!submission && !request.signal?.aborted)
+    if (!completion.submission && !request.signal?.aborted)
       await session.prompt(
-        `Correction: ${failure}. Call ${completionName} once with a valid result bound to the supplied task, attempt, and revision.`,
+        `Correction: ${completion.failure}. Call ${completionName} once with a valid result bound to the supplied task, attempt, and revision.`,
       );
     await logging;
     if (logFailure)
@@ -214,9 +192,9 @@ export async function runRole<T>(
         cause: logFailure,
       });
     if (request.signal?.aborted) throw new Error("Agent cancelled");
-    if (!submission)
-      throw new Error(`Unsuccessful ${request.role}: ${failure}`);
-    return submission;
+    if (!completion.submission)
+      throw new Error(`Unsuccessful ${request.role}: ${completion.failure}`);
+    return completion.submission;
   } finally {
     request.signal?.removeEventListener("abort", abort);
     unsubscribe();
