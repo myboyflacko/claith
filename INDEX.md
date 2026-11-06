@@ -26,6 +26,7 @@
 | `src/lib/uuid.ts`                         | Temporal-safe deterministic workflow UUID helper                                                                               |
 | `src/workspace/`                          | Worktrees, ownership, checked integration, push reconciliation, cleanup, and evidence                                          |
 | `src/agents/`                             | Prepared Implementer/Reviewer modules, role prompt templates, Pi sessions and audit logs                                       |
+| `src/agents/tools/`                       | Role-specific Implementer/Reviewer tool factories and shared structured-submission protocol                                    |
 | `src/cli/`                                | Direct task submission, JSON status, scoped resume, and cancellation                                                           |
 | `tests/`                                  | Targeted configuration, workflow, workspace, Pi, terminal, and opt-in recovery checks                                          |
 | `tests/fixtures/`                         | Isolated Temporal, Git, Pi and interrupted-worker fixtures                                                                     |
