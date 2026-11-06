@@ -1,6 +1,4 @@
-import { readFile } from "node:fs/promises";
-import { Type } from "typebox";
-import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { createReadDiffTool } from "./tools/reviewer/readDiff.js";
 import { assertRevision } from "../workspace/git.js";
 import { withOwnership } from "../workspace/ownership.js";
 import { assertReview, reviewSchema } from "../domain/contracts.js";
@@ -22,21 +20,7 @@ export function createReviewer(context: ReviewerContext) {
       const input = { ...context, contract: task };
       return withOwnership(input.workspace.artifactDir, async () => {
         await assertRevision(input.workspace, input.candidate.revision);
-        const diff: ToolDefinition = {
-          name: "read_diff",
-          label: "Read candidate diff",
-          description: "Read the exact candidate diff",
-          parameters: Type.Object({}),
-          execute: async () => ({
-            content: [
-              {
-                type: "text",
-                text: await readFile(input.candidate.diffRef, "utf8"),
-              },
-            ],
-            details: { revision: input.candidate.revision },
-          }),
-        };
+        const diff = createReadDiffTool(input.candidate);
         return invokeAgent(
           context,
           input,
