@@ -21,6 +21,7 @@ import { logEvent, readJson, writeJson } from "../workspace/storage.js";
 import { createSubmitImplementationTool } from "./tools/submission/submitImplementation.js";
 import { createSubmitReviewTool } from "./tools/submission/submitReview.js";
 import { createSubmissionTool } from "./tools/submission/shared.js";
+import { buildCorrectionPrompt } from "./prompts/user/correction.js";
 
 export interface RoleSession {
   prompt(text: string): Promise<unknown>;
@@ -184,7 +185,7 @@ export async function runRole<T>(
     await session.prompt(request.prompt);
     if (!completion.submission && !request.signal?.aborted)
       await session.prompt(
-        `Correction: ${completion.failure}. Call ${completionName} once with a valid result bound to the supplied task, attempt, and revision.`,
+        buildCorrectionPrompt(completion.failure, completionName),
       );
     await logging;
     if (logFailure)

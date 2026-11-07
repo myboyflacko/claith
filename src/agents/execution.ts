@@ -11,6 +11,8 @@ import type {
 import { readJson, writeJson } from "../workspace/storage.js";
 import { runRole } from "./pi.js";
 import type { SessionFactory } from "./pi.js";
+import { buildImplementerPrompt } from "./prompts/user/implementer.js";
+import { buildReviewerPrompt } from "./prompts/user/reviewer.js";
 export interface AgentContext extends Omit<AttemptInput, "contract"> {
   root: string;
   signal?: AbortSignal;
@@ -36,7 +38,6 @@ export async function invokeAgent<T extends Implementation | Review>(
     await validate(schema.parse(prior.submission));
     return prior;
   }
-  const review = role === "reviewer" ? (input as ReviewInput) : undefined;
   const submission = await runRole(
     {
       role,
@@ -49,16 +50,10 @@ export async function invokeAgent<T extends Implementation | Review>(
         `${input.runId}-${role}-${input.attempt}.jsonl`,
       ),
       systemPrompt: template,
-      prompt: JSON.stringify({
-        task: input.contract,
-        runId: input.runId,
-        attempt: input.attempt,
-        revision,
-        feedback: input.feedback,
-        ...(review
-          ? { candidate: review.candidate, checks: review.checks }
-          : {}),
-      }),
+      prompt:
+        role === "reviewer"
+          ? buildReviewerPrompt(input as ReviewInput, revision)
+          : buildImplementerPrompt(input, revision),
       schema,
       customTools,
       validate,
