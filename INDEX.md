@@ -15,6 +15,9 @@
 | `src/bootstrap.ts`                        | Directory-only startup initialization                                                                                          |
 | `src/settings.ts`                         | Central ~/.claith location                                                                                                     |
 | `src/configuration.ts`                    | config.toml and role-profile loading; non-overwriting explicit init                                                            |
+| `src/application/`                        | Empty scaffold for application use cases; no code migrated yet                                                                 |
+| `src/interfaces/`                         | Empty scaffold for application entry adapters; no code migrated yet                                                            |
+| `src/integrations/`                       | Empty scaffold for external-system integrations; no code migrated yet                                                          |
 | `src/domain/`                             | Runtime/profile schemas, tool registry, minimal task contracts, verification plans, run records and activity interfaces        |
 | `src/domain/claithConfig.ts`              | Interface describing resolved config.toml settings, separate from agent profiles and Pi settings                               |
 | `src/domain/agents.ts`                    | Shared agent definition interfaces for Implementer, Reviewer and Planner, independent of runtime sessions                      |
