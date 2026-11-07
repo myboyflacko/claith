@@ -9,7 +9,7 @@ import type {
 } from "../domain/contracts.js";
 import { invokeAgent } from "./execution.js";
 import type { AgentContext } from "./execution.js";
-import { reviewerTemplate } from "./templates.js";
+import { reviewerSystemPrompt } from "./prompts/system/reviewer.js";
 export interface ReviewerContext extends AgentContext {
   candidate: Candidate;
   checks: CommandEvidence[];
@@ -26,7 +26,7 @@ export function createReviewer(context: ReviewerContext) {
           input,
           "reviewer",
           reviewSchema,
-          reviewerTemplate,
+          reviewerSystemPrompt,
           [diff],
           input.candidate.revision,
           async (value) => {

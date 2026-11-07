@@ -10,7 +10,7 @@ import {
 import type { TaskContract } from "../domain/contracts.js";
 import { invokeAgent } from "./execution.js";
 import type { AgentContext } from "./execution.js";
-import { implementerTemplate } from "./templates.js";
+import { implementerSystemPrompt } from "./prompts/system/implementer.js";
 export function createImplementer(context: AgentContext) {
   return {
     run: async (task: TaskContract) => {
@@ -38,7 +38,7 @@ export function createImplementer(context: AgentContext) {
           input,
           "implementer",
           implementationSchema,
-          implementerTemplate,
+          implementerSystemPrompt,
           [bash],
           binding.revision,
           (value) => {
