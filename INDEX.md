@@ -28,7 +28,8 @@
 | `src/runtime/projectClient.ts`            | Stable project IDs, startup/signals, child run IDs for task controls and full evidence history reads                           |
 | `src/lib/uuid.ts`                         | Temporal-safe deterministic workflow UUID helper                                                                               |
 | `src/workspace/`                          | Worktrees, ownership, checked integration, push reconciliation, cleanup, and evidence                                          |
-| `src/agents/`                             | Prepared Implementer/Reviewer modules, role prompt templates, Pi sessions and audit logs                                       |
+| `src/agents/`                             | Prepared Implementer/Reviewer modules, Pi sessions and audit logs                                                              |
+| `src/agents/prompts/`                     | Per-role system prompts, JSON task/review request builders and shared correction messages                                      |
 | `src/agents/tools/`                       | Custom tool factories grouped by execution, artifacts and submission; role selection stays in agent assembly                   |
 | `src/cli/`                                | Direct task submission, JSON status, scoped resume, and cancellation                                                           |
 | `tests/`                                  | Targeted configuration, workflow, workspace, Pi, terminal, and opt-in recovery checks                                          |
