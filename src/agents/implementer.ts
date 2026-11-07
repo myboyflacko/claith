@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { withOwnership } from "../workspace/ownership.js";
 import { readJson, writeJson } from "../workspace/storage.js";
-import { createBashTool } from "./tools/implementer/bash.js";
+import { createBashTool } from "./tools/execution/bash.js";
 import { git } from "../workspace/git.js";
 import {
   assertImplementation,

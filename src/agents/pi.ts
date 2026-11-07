@@ -18,9 +18,9 @@ import { rolePolicy, toolRegistry } from "../domain/tools.js";
 import type { Role } from "../configuration.js";
 import type { ExecutionAgentProfile } from "../domain/configuration.js";
 import { logEvent, readJson, writeJson } from "../workspace/storage.js";
-import { createSubmitImplementationTool } from "./tools/implementer/submitImplementation.js";
-import { createSubmitReviewTool } from "./tools/reviewer/submitReview.js";
-import { createSubmissionTool } from "./tools/shared/submission.js";
+import { createSubmitImplementationTool } from "./tools/submission/submitImplementation.js";
+import { createSubmitReviewTool } from "./tools/submission/submitReview.js";
+import { createSubmissionTool } from "./tools/submission/shared.js";
 
 export interface RoleSession {
   prompt(text: string): Promise<unknown>;

@@ -1,4 +1,4 @@
-import { createReadDiffTool } from "./tools/reviewer/readDiff.js";
+import { createReadDiffTool } from "./tools/artifacts/readDiff.js";
 import { assertRevision } from "../workspace/git.js";
 import { withOwnership } from "../workspace/ownership.js";
 import { assertReview, reviewSchema } from "../domain/contracts.js";

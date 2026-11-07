@@ -4,10 +4,10 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { createBashTool } from "../src/agents/tools/implementer/bash.js";
-import { createSubmitImplementationTool } from "../src/agents/tools/implementer/submitImplementation.js";
-import { createReadDiffTool } from "../src/agents/tools/reviewer/readDiff.js";
-import { createSubmitReviewTool } from "../src/agents/tools/reviewer/submitReview.js";
+import { createBashTool } from "../src/agents/tools/execution/bash.js";
+import { createSubmitImplementationTool } from "../src/agents/tools/submission/submitImplementation.js";
+import { createReadDiffTool } from "../src/agents/tools/artifacts/readDiff.js";
+import { createSubmitReviewTool } from "../src/agents/tools/submission/submitReview.js";
 import { runCommand } from "../src/workspace/process.js";
 
 vi.mock("../src/workspace/process.js", () => ({ runCommand: vi.fn() }));

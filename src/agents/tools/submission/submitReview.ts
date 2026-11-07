@@ -1,8 +1,5 @@
-import { createSubmissionTool } from "../shared/submission.js";
-import type {
-  SubmissionOptions,
-  SubmissionTool,
-} from "../shared/submission.js";
+import { createSubmissionTool } from "./shared.js";
+import type { SubmissionOptions, SubmissionTool } from "./shared.js";
 
 export function createSubmitReviewTool<T>(
   options: SubmissionOptions<T>,
