@@ -11,8 +11,8 @@ import type {
   ResourceLoader,
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-import type { AgentSession } from "../../application/agentSession.js";
-import type { AgentDefinition } from "../../domain/agents.js";
+import type { AgentSession } from "../application/agentSession.js";
+import type { AgentDefinition } from "../domain/agents.js";
 
 export interface PiSessionOptions {
   agent: Pick<AgentDefinition, "model" | "developerInstructions" | "tools">;

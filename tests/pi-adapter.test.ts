@@ -17,8 +17,8 @@ import type {
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { createPiSession } from "../src/integrations/pi/adapter.js";
-import type { PiSessionOptions } from "../src/integrations/pi/adapter.js";
+import { createPiSession } from "../src/integrations/pi.js";
+import type { PiSessionOptions } from "../src/integrations/pi.js";
 
 let root: string;
 let directory: string;

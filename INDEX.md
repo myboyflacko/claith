@@ -16,7 +16,8 @@
 | `src/settings.ts`                         | Central ~/.claith location                                                                                                     |
 | `src/configuration.ts`                    | config.toml and role-profile loading; non-overwriting explicit init                                                            |
 | `src/application/`                        | Application contracts, including the SDK-independent AgentSession interface                                                    |
-| `src/integrations/pi/SPEC.md`             | Prepared-session configuration isolation, role-neutral boundary and lifecycle contracts                                        |
+| `src/integrations/SPEC.md`                | Prepared-session configuration isolation, role-neutral boundary and lifecycle contracts                                        |
+| `src/integrations/pi.ts`                  | Role-neutral Pi session factory accepting prepared agent configuration                                                         |
 | `src/interfaces/`                         | Empty scaffold for application entry adapters; no code migrated yet                                                            |
 | `src/integrations/`                       | External-system adapters; includes the standalone role-neutral Pi session adapter                                              |
 | `src/domain/`                             | Runtime/profile schemas, tool registry, minimal task contracts, verification plans, run records and activity interfaces        |
