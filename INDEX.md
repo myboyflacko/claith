@@ -13,7 +13,7 @@
 | `vitest.config.ts`                            | Vitest configuration                                                                                              |
 | `src/main.ts`                                 | Development and compiled CLI entrypoint                                                                           |
 | `src/domain/`                                 | Task contracts, verification plans, submission validation, delivery evidence and run models                       |
-| `src/application/agents/definitions.ts`       | SDK-independent Implementer, Reviewer and Planner definitions                                                     |
+| `src/domain/agents.ts`                        | SDK-independent Implementer, Reviewer and Planner definitions                                                     |
 | `src/application/agents/tools.ts`             | Tool registry, role permissions and available tool selection                                                      |
 | `src/application/agents/prompts/system/`      | Application-owned Implementer, Reviewer and Planner instructions                                                  |
 | `src/infrastructure/bootstrap.ts`             | Directory-only startup initialization                                                                             |
