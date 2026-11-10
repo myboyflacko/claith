@@ -20,6 +20,7 @@
 | `src/infrastructure/configuration/directories.ts` | Runtime directory creation                                                                                        |
 | `src/infrastructure/settings.ts`                  | Central ~/.claith location                                                                                        |
 | `src/infrastructure/configuration/`               | Runtime/profile schemas, resolved settings and config.toml/profile file loading and initialization                |
+| `src/infrastructure/configuration/claithConfig/`  | Sectioned Claith config schema, creation, TOML parsing and strict validation; startup integration is separate     |
 | `src/infrastructure/process.ts`                   | Logged and cancellable subprocess execution                                                                       |
 | `src/infrastructure/storage/files.ts`             | JSON persistence, artifact paths and JSONL event logging                                                          |
 | `src/infrastructure/workspace/`                   | Git/worktree operations, writer ownership, verification, delivery checkpoints, integration, push and cleanup      |
