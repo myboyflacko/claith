@@ -13,9 +13,9 @@ function template(role: AgentRole, prompt: string): AgentProfileTemplate {
     config: {
       role,
       permissions: role === "implementer" ? "read-write" : "read-only",
-      reasoning: "medium",
+      additionalSkillsDirs: [],
       // Templates need an explicit provider/model before they can be loaded.
-      model: { provider: "", name: "" },
+      model: { provider: "", name: "", reasoning: "medium" },
     },
     prompt,
   };

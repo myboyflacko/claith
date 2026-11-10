@@ -25,6 +25,28 @@ model credentials or connect to Temporal or Pi. Before later loading a profile,
 set `[model].provider` and `[model].name` in its `config.toml`, and edit
 `prompt.md` as needed.
 
+A new profile uses this layout:
+
+```toml
+role = "implementer"
+permissions = "read-write"
+additionalSkillsDirs = []
+
+[model]
+provider = ""
+name = ""
+reasoning = "medium"
+```
+
+`additionalSkillsDirs` is optional and has no default directory. Relative paths
+are resolved from the profile directory; absolute paths are used directly.
+Configured additional directories must already exist. The parser returns their
+paths alongside the shared and profile skill directories; skill execution is
+not yet connected. `init` does not create these additional directories.
+
+In existing profiles, move a top-level `reasoning` value into `[model]`.
+`init` preserves existing files and does not migrate their contents.
+
 The current CLI exposes `init`; no command or `--help` prints usage without
 creating files. The runtime commands described below await reconnection after
 the repository layout refactor.

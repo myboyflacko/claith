@@ -27,18 +27,22 @@ import {
 function config(role: AgentRole = "implementer"): AgentProfileConfig {
   return {
     ...defaultAgentProfiles[role].config,
-    model: { provider: "test-provider", name: "test-model" },
+    model: {
+      ...defaultAgentProfiles[role].config.model,
+      provider: "test-provider",
+      name: "test-model",
+    },
   };
 }
 
 describe("agent profile validation", () => {
-  it("requires every config field, including model identity", () => {
-    for (const key of Object.keys(config())) {
+  it("requires core config fields, including model identity and reasoning", () => {
+    for (const key of ["role", "permissions", "model"]) {
       const value: Record<string, unknown> = { ...config() };
       delete value[key];
       expect(() => validateAgentProfileConfig(value)).toThrow(key);
     }
-    for (const key of ["provider", "name"]) {
+    for (const key of ["provider", "name", "reasoning"]) {
       const model: Record<string, unknown> = { ...config().model };
       delete model[key];
       expect(() => validateAgentProfileConfig({ ...config(), model })).toThrow(
@@ -49,13 +53,18 @@ describe("agent profile validation", () => {
 
   it.each([
     { ...config(), role: "unknown" },
-    { ...config(), reasoning: "invalid" },
+    { ...config(), reasoning: "medium" },
+    { ...config(), model: { ...config().model, reasoning: "invalid" } },
+    { ...config(), additionalSkillsDirs: "not-an-array" },
+    { ...config(), additionalSkillsDirs: [""] },
+    { ...config(), additionalSkillsDirs: ["   "] },
+    { ...config(), additionalSkillsDirs: [42] },
     { ...config(), permissions: "all" },
     { ...config(), tools: ["bash"] },
     { ...config(), instructions: "Use prompt.md instead" },
     { ...config(), model: { ...config().model, extra: true } },
-    { ...config(), model: { provider: "", name: "model" } },
-    { ...config(), model: { provider: "provider", name: " " } },
+    { ...config(), model: { ...config().model, provider: "" } },
+    { ...config(), model: { ...config().model, name: " " } },
   ])("rejects invalid config %j", (value) => {
     expect(() => validateAgentProfileConfig(value)).toThrow();
   });
@@ -152,6 +161,7 @@ describe("agent profile files", () => {
         skills: {
           shared: join(root, "agents", "skills"),
           profile: profilePath(role, "skills"),
+          additional: [],
         },
       });
     },
@@ -170,6 +180,64 @@ describe("agent profile files", () => {
       "skills",
     ]);
   });
+
+  it("resolves additional skill directories relative to the profile and keeps absolute paths", async () => {
+    await saveProfile("custom");
+    const relative = "extra-skills";
+    const absolute = join(root, "external-skills");
+    await mkdir(profilePath("custom", relative));
+    await mkdir(absolute);
+    await writeFile(
+      profilePath("custom", "config.toml"),
+      stringify({
+        ...config(),
+        additionalSkillsDirs: [relative, absolute],
+        model: { ...config().model, reasoning: "high" },
+      }),
+    );
+
+    const profile = await parseAgentProfile("custom", { configDir: root });
+    expect(profile.skills.additional).toEqual([
+      profilePath("custom", relative),
+      absolute,
+    ]);
+    expect(profile.config.model.reasoning).toBe("high");
+    expect(profile.config.additionalSkillsDirs).toEqual([relative, absolute]);
+  });
+
+  it("uses no additional skill paths when the optional field is omitted", async () => {
+    await saveProfile("custom");
+    const value = config();
+    delete value.additionalSkillsDirs;
+    await writeFile(profilePath("custom", "config.toml"), stringify(value));
+
+    const profile = await parseAgentProfile("custom", { configDir: root });
+    expect(profile.skills.additional).toEqual([]);
+    expect(profile.config).not.toHaveProperty("additionalSkillsDirs");
+  });
+
+  it.each(["missing", "file"])(
+    "rejects an additional skills path that is %s without creating it",
+    async (kind) => {
+      await saveProfile("custom");
+      const path = join(root, "external-skills");
+      if (kind === "file") await writeFile(path, "preserve me");
+      await writeFile(
+        profilePath("custom", "config.toml"),
+        stringify({
+          ...config(),
+          additionalSkillsDirs: [path],
+        }),
+      );
+
+      await expect(
+        parseAgentProfile("custom", { configDir: root }),
+      ).rejects.toThrow(path);
+      if (kind === "file")
+        expect(await readFile(path, "utf8")).toBe("preserve me");
+      else await expect(stat(path)).rejects.toMatchObject({ code: "ENOENT" });
+    },
+  );
 
   it("restores missing standard files and directories while preserving user content", async () => {
     await createDefaultAgentProfiles({ configDir: root });
@@ -259,7 +327,10 @@ describe("agent profile files", () => {
     ["config.toml", "broken = [", "config.toml"],
     [
       "config.toml",
-      stringify({ ...config(), reasoning: "invalid" }),
+      stringify({
+        ...config(),
+        model: { ...config().model, reasoning: "invalid" },
+      }),
       "reasoning",
     ],
     ["prompt.md", " \n", "prompt.md"],

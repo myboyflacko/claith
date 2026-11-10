@@ -17,10 +17,11 @@ export const agentProfileConfigSchema = z
   .strictObject({
     role: z.enum(agentRoles),
     permissions: z.enum(["read-only", "read-write"]),
-    reasoning: z.enum(["off", "minimal", "low", "medium", "high", "xhigh"]),
+    additionalSkillsDirs: z.array(z.string().trim().min(1)).optional(),
     model: z.strictObject({
       provider: z.string().trim().min(1, "Select a provider"),
       name: z.string().trim().min(1, "Select a model"),
+      reasoning: z.enum(["off", "minimal", "low", "medium", "high", "xhigh"]),
     }),
   })
   .refine(
@@ -44,5 +45,5 @@ export interface AgentProfile {
   name: string;
   config: AgentProfileConfig;
   prompt: string;
-  skills: { shared: string; profile: string };
+  skills: { shared: string; profile: string; additional: string[] };
 }

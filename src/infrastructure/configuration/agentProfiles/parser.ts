@@ -1,5 +1,5 @@
 import { readFile, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { parse } from "smol-toml";
 import { appSettings, type AppSettings } from "../../settings.js";
 import { profileNameSchema, type AgentProfile } from "./schema.js";
@@ -33,8 +33,11 @@ export async function parseAgentProfile(
   const skills = {
     shared: join(agentsDir, "skills"),
     profile: join(profileDir, "skills"),
+    additional: (config.additionalSkillsDirs ?? []).map((path) =>
+      resolve(profileDir, path),
+    ),
   };
-  for (const path of Object.values(skills)) {
+  for (const path of [skills.shared, skills.profile, ...skills.additional]) {
     try {
       if (!(await stat(path)).isDirectory())
         throw new Error("Expected a directory");

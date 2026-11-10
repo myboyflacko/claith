@@ -71,7 +71,8 @@ describe("init CLI process", () => {
         parse(await readFile(join(profile, "config.toml"), "utf8")),
       ).toMatchObject({
         role,
-        model: { provider: "", name: "" },
+        additionalSkillsDirs: [],
+        model: { provider: "", name: "", reasoning: "medium" },
       });
       expect(
         (await readFile(join(profile, "prompt.md"), "utf8")).trim(),
