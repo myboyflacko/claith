@@ -10,7 +10,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { runRole } from "../src/agents/pi.js";
 import type { RoleRequest, SessionFactory } from "../src/agents/pi.js";
-import type { Role } from "../src/configuration.js";
+import type { Role } from "../src/infrastructure/bootstrap/configuration.js";
 import { agentProfile } from "./fixtures/profiles.js";
 
 let temp: string;

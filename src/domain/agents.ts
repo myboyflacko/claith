@@ -21,7 +21,6 @@ export interface Reviewer extends AgentDefinition {
   readonly permissions: "read-only";
 }
 
-/** Describes the planner only; it does not register a runtime role. */
 export interface Planner extends AgentDefinition {
   readonly role: "planner";
   readonly permissions: "read-only";

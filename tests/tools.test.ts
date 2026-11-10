@@ -3,7 +3,7 @@ import {
   executionConfigurationSchema,
   executionProfileSchema,
   profileSchema,
-} from "../src/configuration.js";
+} from "../src/infrastructure/bootstrap/configuration.js";
 import { roles, ToolRegistry, toolRegistry } from "../src/domain/tools.js";
 import { agentProfile, agentProfiles } from "./fixtures/profiles.js";
 

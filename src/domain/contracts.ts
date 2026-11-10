@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { ExecutionConfiguration } from "../configuration.js";
+import type { ExecutionConfiguration } from "../infrastructure/bootstrap/configuration.js";
 
 export const identity = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/);
 export const runIdentity = z

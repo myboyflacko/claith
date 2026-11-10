@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { runtimeSchema } from "../../src/configuration.js";
+import { runtimeSchema } from "../../src/infrastructure/bootstrap/configuration.js";
 import { contractSchema } from "../../src/domain/contracts.js";
 import type {
   RunInput,

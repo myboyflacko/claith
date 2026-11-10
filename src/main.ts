@@ -1,4 +1,4 @@
-import { runCli } from "./cli/index.js";
+import { runCli } from "./interfaces/cli/index.js";
 
 try {
   await runCli();

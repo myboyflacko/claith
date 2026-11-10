@@ -12,11 +12,11 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { bootstrap } from "../src/bootstrap.js";
-import { createDirectories } from "../src/infrastructure/directories.js";
+import { bootstrap } from "../src/infrastructure/bootstrap.js";
+import { createDirectories } from "../src/infrastructure/bootstrap/directories.js";
 import { appSettings } from "../src/settings.js";
 import { parse } from "smol-toml";
-import { executionRoles as roles } from "../src/configuration.js";
+import { executionRoles as roles } from "../src/infrastructure/bootstrap/configuration.js";
 
 const execFileAsync = promisify(execFile);
 let temporaryDirectory: string;
@@ -148,7 +148,7 @@ describe("application startup", () => {
 describe("runtime configuration", () => {
   it("creates explicit permission profiles and snapshots their resolved tools", async () => {
     const { initializeConfiguration, loadConfiguration } =
-      await import("../src/configuration.js");
+      await import("../src/infrastructure/bootstrap/configuration.js");
     await initializeConfiguration(temporaryDirectory);
     const entries = await readdir(temporaryDirectory);
     expect(entries).toContain("config.toml");
@@ -199,7 +199,7 @@ describe("runtime configuration", () => {
     ],
   ])("rejects invalid rights in %s: %s", async (role, permissions, message) => {
     const { initializeConfiguration, loadConfiguration } =
-      await import("../src/configuration.js");
+      await import("../src/infrastructure/bootstrap/configuration.js");
     await initializeConfiguration(temporaryDirectory);
     for (const name of roles) {
       await writeFile(
@@ -218,7 +218,7 @@ describe("runtime configuration", () => {
 
   it("creates templates without overwriting user files and requires explicit models", async () => {
     const { initializeConfiguration, loadConfiguration } =
-      await import("../src/configuration.js");
+      await import("../src/infrastructure/bootstrap/configuration.js");
     await initializeConfiguration(temporaryDirectory);
     await expect(loadConfiguration(temporaryDirectory)).rejects.toThrow(
       "Select a Pi provider",
@@ -252,7 +252,7 @@ describe("runtime configuration", () => {
 
   it("identifies malformed TOML, missing profiles, and invalid settings", async () => {
     const { initializeConfiguration, loadConfiguration } =
-      await import("../src/configuration.js");
+      await import("../src/infrastructure/bootstrap/configuration.js");
     await expect(loadConfiguration(temporaryDirectory)).rejects.toThrow(
       "config.toml",
     );

@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { initializeConfiguration } from "../src/configuration.js";
+import { initializeConfiguration } from "../src/infrastructure/bootstrap/configuration.js";
 import { taskInput } from "./fixtures/task.js";
 const doubles = vi.hoisted(() => ({
   client: {
@@ -17,7 +17,7 @@ const doubles = vi.hoisted(() => ({
 vi.mock("../src/runtime/client.js", () => ({
   DeliveryClient: { connect: doubles.connect },
 }));
-import { runCli } from "../src/cli/index.js";
+import { runCli } from "../src/interfaces/cli/index.js";
 let root: string;
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), "claith-cli-"));

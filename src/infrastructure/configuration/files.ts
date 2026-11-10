@@ -1,20 +1,20 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parse, stringify } from "smol-toml";
-import { createDirectories } from "./infrastructure/directories.js";
+import { createDirectories } from "../directories.js";
 
 import {
   executionRoles,
   resolveProfile,
   runtimeSchema,
-} from "./domain/configuration.js";
-import { rolePolicy } from "./domain/tools.js";
+} from "../../domain/configuration.js";
+import { rolePolicy } from "../../domain/tools.js";
 import type {
   ExecutionAgentProfile,
   ExecutionConfiguration,
   ExecutionRole,
-} from "./domain/configuration.js";
-export * from "./domain/configuration.js";
+} from "../../domain/configuration.js";
+export * from "../../domain/configuration.js";
 
 async function loadToml(path: string): Promise<unknown> {
   try {
