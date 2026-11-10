@@ -29,7 +29,10 @@ A new profile uses this layout:
 
 ```toml
 role = "implementer"
+description = "Implements approved tasks and provides verification evidence."
 permissions = "read-write"
+
+[skills]
 additionalSkillsDirs = []
 
 [model]
@@ -38,13 +41,15 @@ name = ""
 reasoning = "medium"
 ```
 
-`additionalSkillsDirs` is optional and has no default directory. Relative paths
+`description` is required and must describe the agent with non-empty text.
+`skills.additionalSkillsDirs` is optional and has no default directory. Relative paths
 are resolved from the profile directory; absolute paths are used directly.
 Configured additional directories must already exist. The parser returns their
 paths alongside the shared and profile skill directories; skill execution is
 not yet connected. `init` does not create these additional directories.
 
-In existing profiles, move a top-level `reasoning` value into `[model]`.
+In existing profiles, add a top-level `description`, move `additionalSkillsDirs`
+into `[skills]`, and move a top-level `reasoning` value into `[model]`.
 `init` preserves existing files and does not migrate their contents.
 
 The current CLI exposes `init`; no command or `--help` prints usage without

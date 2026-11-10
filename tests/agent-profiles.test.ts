@@ -37,7 +37,7 @@ function config(role: AgentRole = "implementer"): AgentProfileConfig {
 
 describe("agent profile validation", () => {
   it("requires core config fields, including model identity and reasoning", () => {
-    for (const key of ["role", "permissions", "model"]) {
+    for (const key of ["role", "description", "permissions", "model"]) {
       const value: Record<string, unknown> = { ...config() };
       delete value[key];
       expect(() => validateAgentProfileConfig(value)).toThrow(key);
@@ -55,10 +55,15 @@ describe("agent profile validation", () => {
     { ...config(), role: "unknown" },
     { ...config(), reasoning: "medium" },
     { ...config(), model: { ...config().model, reasoning: "invalid" } },
-    { ...config(), additionalSkillsDirs: "not-an-array" },
-    { ...config(), additionalSkillsDirs: [""] },
-    { ...config(), additionalSkillsDirs: ["   "] },
-    { ...config(), additionalSkillsDirs: [42] },
+    { ...config(), description: "" },
+    { ...config(), description: "   " },
+    { ...config(), description: 42 },
+    { ...config(), additionalSkillsDirs: [] },
+    { ...config(), skills: { unknown: [] } },
+    { ...config(), skills: { additionalSkillsDirs: "not-an-array" } },
+    { ...config(), skills: { additionalSkillsDirs: [""] } },
+    { ...config(), skills: { additionalSkillsDirs: ["   "] } },
+    { ...config(), skills: { additionalSkillsDirs: [42] } },
     { ...config(), permissions: "all" },
     { ...config(), tools: ["bash"] },
     { ...config(), instructions: "Use prompt.md instead" },
@@ -77,6 +82,15 @@ describe("agent profile validation", () => {
       }),
     ).toThrow("permissions");
     expect(validateAgentProfileConfig(config(role))).toEqual(config(role));
+  });
+
+  it("accepts an agent description supplied by the user", () => {
+    expect(
+      validateAgentProfileConfig({
+        ...config(),
+        description: "  Reviews frontend changes.  ",
+      }).description,
+    ).toBe("Reviews frontend changes.");
   });
 
   it("allows a restricted implementer", () => {
@@ -191,7 +205,7 @@ describe("agent profile files", () => {
       profilePath("custom", "config.toml"),
       stringify({
         ...config(),
-        additionalSkillsDirs: [relative, absolute],
+        skills: { additionalSkillsDirs: [relative, absolute] },
         model: { ...config().model, reasoning: "high" },
       }),
     );
@@ -202,19 +216,26 @@ describe("agent profile files", () => {
       absolute,
     ]);
     expect(profile.config.model.reasoning).toBe("high");
-    expect(profile.config.additionalSkillsDirs).toEqual([relative, absolute]);
+    expect(profile.config.skills?.additionalSkillsDirs).toEqual([
+      relative,
+      absolute,
+    ]);
   });
 
-  it("uses no additional skill paths when the optional field is omitted", async () => {
-    await saveProfile("custom");
-    const value = config();
-    delete value.additionalSkillsDirs;
-    await writeFile(profilePath("custom", "config.toml"), stringify(value));
+  it.each(["section", "field"])(
+    "uses no additional skill paths when the optional skills %s is omitted",
+    async (omitted) => {
+      await saveProfile("custom");
+      const value = config();
+      if (omitted === "section") delete value.skills;
+      else value.skills = {};
+      await writeFile(profilePath("custom", "config.toml"), stringify(value));
 
-    const profile = await parseAgentProfile("custom", { configDir: root });
-    expect(profile.skills.additional).toEqual([]);
-    expect(profile.config).not.toHaveProperty("additionalSkillsDirs");
-  });
+      const profile = await parseAgentProfile("custom", { configDir: root });
+      expect(profile.skills.additional).toEqual([]);
+      expect(profile.config.skills?.additionalSkillsDirs).toBeUndefined();
+    },
+  );
 
   it.each(["missing", "file"])(
     "rejects an additional skills path that is %s without creating it",
@@ -226,7 +247,7 @@ describe("agent profile files", () => {
         profilePath("custom", "config.toml"),
         stringify({
           ...config(),
-          additionalSkillsDirs: [path],
+          skills: { additionalSkillsDirs: [path] },
         }),
       );
 

@@ -16,8 +16,13 @@ export const profileNameSchema = z
 export const agentProfileConfigSchema = z
   .strictObject({
     role: z.enum(agentRoles),
+    description: z.string().trim().min(1, "Describe the agent"),
     permissions: z.enum(["read-only", "read-write"]),
-    additionalSkillsDirs: z.array(z.string().trim().min(1)).optional(),
+    skills: z
+      .strictObject({
+        additionalSkillsDirs: z.array(z.string().trim().min(1)).optional(),
+      })
+      .optional(),
     model: z.strictObject({
       provider: z.string().trim().min(1, "Select a provider"),
       name: z.string().trim().min(1, "Select a model"),

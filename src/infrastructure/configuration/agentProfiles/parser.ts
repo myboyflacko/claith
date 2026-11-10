@@ -33,7 +33,7 @@ export async function parseAgentProfile(
   const skills = {
     shared: join(agentsDir, "skills"),
     profile: join(profileDir, "skills"),
-    additional: (config.additionalSkillsDirs ?? []).map((path) =>
+    additional: (config.skills?.additionalSkillsDirs ?? []).map((path) =>
       resolve(profileDir, path),
     ),
   };
