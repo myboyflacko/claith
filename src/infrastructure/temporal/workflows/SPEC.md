@@ -1,13 +1,16 @@
 ---
 id: project-workflow
-type: module-design
+type: submodule-design
 status: draft
 title: Repository project scheduler
+parent: temporal-runtime
 ---
 
 ## Responsibility
 
-One durable project workflow per canonical Git URL schedules explicitly submitted tasks and contract task plans through the existing taskWorkflow delivery lifecycle. Standalone task submission uses that same lifecycle. This internal execution API does not approve phases, imply human acceptance, or autonomously extend a roadmap.
+The source defines one durable project workflow per canonical Git URL to schedule explicitly submitted tasks and JSON task plans through taskWorkflow. Standalone task submission shares that lifecycle. This internal execution API does not approve phases, imply human acceptance, or autonomously extend a roadmap.
+
+`temporal-runtime` records the disconnected worker/agent wiring. The rules below describe existing source contracts; they are not a claim that the current CLI can execute them. Product requirements belong to `claith-goal`, and task-level contracts here are not approved phase Delivery Contracts.
 
 ## Boundary
 
@@ -16,6 +19,8 @@ Workflow code owns scheduling and replayable state; Activities alone access Git,
 New project executions start taskWorkflow on the configured project queue. The project-taskflow-v1 patch preserves original stub dispatch, defaults and cleanup for pre-patch histories; the orchestrator export and claith-orchestrator queue exist only for that compatibility path. ProjectClient derives project-{sha256(url)} identity keys; callers supply a consistent canonical URL. Closed projects can be explicitly restarted; running projects are reused without silently applying configuration.
 
 ## Scheduling and control
+
+Current admission selects dependency-satisfied tasks from workflow backlog state by priority and creation time. There is no explicit SQLite task status/readiness gate. The required Planner-managed `ready` task source is a different, unimplemented boundary described in `planning-application` and `claith-architecture`; it must not be claimed as delivered by this scheduler.
 
 Signals synchronously queue commands. Pause defers mutations while allowing children to finish; resume/shutdown are immediate controls. Invalid commands appear in bounded rejection diagnostics rather than breaking workflow execution. Batch insertion is atomic, resolves same-batch dependencies and rejects cycles. A task ID cannot move between contracts; collisions reject the entire plan instead of silently completing an empty contract. Failed tasks require explicit resubmission; pending/running/completed duplicates within the same contract are ignored. Removing a required dependency is rejected. Reorder requires a complete backlog permutation and assigns explicit priorities.
 
@@ -35,7 +40,7 @@ Evidence writes use SQLite transactions and stable project/evidence IDs; changed
 
 ## Task delivery adapters
 
-Task payloads contain a matching TaskContract and optionally an ExecutionConfiguration; otherwise the worker loads its configured profiles. Preparation validates identity, snapshots configuration and the current dev revision, and persists an immutable RunInput before child dispatch. The child workflow ID is its runId, so existing task status/resume/cancel APIs can address project children. Delivery supports dev only. New managed clones are bare; existing non-bare project clones require explicit reconciliation rather than silent replacement. Synchronizing dev is fast-forward-only under the native integration ownership lock.
+Task payloads contain a matching TaskContract and optionally an ExecutionConfiguration; otherwise the worker loads its configured profiles. Preparation validates identity, snapshots configuration and the current dev revision, and persists an immutable RunInput before child dispatch. The child workflow ID is its runId, so existing task status/resume/cancel APIs can address project children. Current delivery supports dev only; project-specific delivery targets required by `claith-goal` are not implemented. New managed clones are bare; existing non-bare project clones require explicit reconciliation rather than silent replacement. Synchronizing dev is fast-forward-only under the native integration ownership lock.
 
 Completion requires a matching RunRecord, accepted review bound to the verified candidate, passing integration checks and confirmed push/cleanup. Evidence points to actual check, review, diff, session and run artifacts. A returned non-completed record is not successful delivery.
 
@@ -45,4 +50,4 @@ A Temporal timeout does not prove its Activity implementation stopped. In partic
 
 Managed clones, admission metadata, evidence databases and references are isolated by Temporal namespace and project identity beneath the Claith root. Short same-worker repository writes queue under the existing filesystem ownership lock; another process's live owner remains a blocker. Project Git commands use the durable process-group runner, recording launches before execution and refusing recovery while a prior group is alive. Legacy worktree lease/sync/release adapters remain available for pre-patch execution; they are not the creation or cleanup path for new project tasks.
 
-Contract planning loads a JSON object with contractId and a tasks array from contractRef; AI decomposition is deferred. SSH references need a worker-side secret resolver, never key material in history.
+Contract planning loads a JSON object with contractId and a tasks array from contractRef; it does not invoke the collaborative Planner or manage a SQLite task queue. SSH references need a worker-side secret resolver, never key material in history.

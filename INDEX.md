@@ -2,6 +2,13 @@
 | ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | `README.md`                                       | Native runtime, terminal commands, configuration, recovery, and verification                                      |
 | `AGENTS.md`                                       | Repository instructions and working standards                                                                     |
+| `goal-and-requirements.md`                        | Draft product ground truth: collaborative Goal-based planning and autonomous task delivery                        |
+| `architecture.md`                                 | Draft spec graph root: SQLite task intent, Temporal execution, module boundaries and implementation gaps          |
+| `src/domain/SPEC.md`                              | Task identity, structured submissions and revision-bound evidence acceptance                                      |
+| `src/application/SPEC.md`                         | Planner task-management boundary, role/tool policy and disconnected agent composition                             |
+| `src/infrastructure/configuration/SPEC.md`        | Create-only initialization, strict profile/config loading and migration boundaries                                |
+| `src/infrastructure/temporal/SPEC.md`             | Workflow/Activity boundary, evidence persistence and current runtime wiring gaps                                  |
+| `src/infrastructure/workspace/SPEC.md`            | Git ownership, candidate/integration evidence, safe push/cleanup and configurable-target limitation               |
 | `package.json`                                    | npm entrypoints, checks, and pinned runtime dependencies                                                          |
 | `package-lock.json`                               | Locked dependency graph for npm ci                                                                                |
 | `.nvmrc`                                          | Node.js major version                                                                                             |
@@ -32,7 +39,7 @@
 | `src/infrastructure/temporal/activities/`         | Activity registration, heartbeats, managed repositories, task-run collection and evidence persistence             |
 | `src/infrastructure/temporal/workflows/`          | Temporal delivery/project workflows, signals, queries, configuration, runtime types and deterministic UUID helper |
 | `src/infrastructure/temporal/workflows/SPEC.md`   | Project admission, Taskflow workspace ownership, delivery evidence and replay contracts                           |
-| `src/interfaces/cli/`                             | Terminal init command and usage help                                                                              |
+| `src/interfaces/cli/`                             | Connected terminal interface: init and usage help only; delivery commands are not wired                           |
 | `tests/`                                          | Tests mirror src/ module paths; integration suites live under their owning module                                 |
 | `tests/fixtures/`                                 | Fixtures shared across test modules; module-specific fixtures live under tests/<module>/fixtures/                 |
 | `docs/acceptance.md`                              | Real Pi acceptance procedure and recorded evidence                                                                |

@@ -3,13 +3,15 @@ id: pi-session-adapter
 type: module-design
 title: Role-neutral Pi session adapter
 status: draft
+parent: claith-architecture
+depends-on: [planning-application]
 ---
 
 ## Responsibility and boundary
 
-The adapter translates a caller-prepared agent configuration into a Pi SDK session and returns the SDK-independent AgentSession contract from application/agentSession.ts. Role selection, permission policy, tool composition, task prompts and result acceptance belong to the caller. The adapter does not inspect a role or add role-specific tools, completion protocols or correction prompts.
+The adapter translates a caller-prepared agent configuration into a Pi SDK session and exposes an SDK-independent session interface. Role selection, permission policy, tool composition, task prompts and result acceptance belong to the caller under `planning-application`. The adapter does not inspect a role or add role-specific tools, completion protocols or correction prompts.
 
-The existing agents/pi.ts execution path is independent and does not use this adapter.
+The referenced application session contract and relocated domain import are currently unresolved after the refactor. The former agents/pi.ts execution module is absent, and this adapter has no connected production caller. The lifecycle below describes the source implementation, not a functioning end-to-end role execution path.
 
 ## Configuration isolation
 

@@ -2,8 +2,15 @@
 
 Self-hosted task delivery through Temporal and Pi. One directly submitted contract
 runs through fresh implementer/reviewer sessions, bounded repairs, verified
-integration into `dev`, push to `origin/dev`, and cleanup. Autonomous phase planning
-and final human phase acceptance remain future work.
+integration into `dev`, push to `origin/dev`, and cleanup.
+
+Product direction and implementation boundaries are documented in
+[`goal-and-requirements.md`](goal-and-requirements.md) and
+[`architecture.md`](architecture.md). The target is collaborative Goal-based
+planning, a Planner-managed SQLite task queue, deterministic dispatch and
+project-configurable Git delivery—not mandatory phase approval or human final
+acceptance. These draft specs distinguish requirements from existing source;
+current runtime wiring has unresolved refactor imports and missing agent modules.
 
 ## Initialize local files
 
