@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { stringify } from "smol-toml";
 import { appSettings, type AppSettings } from "../../settings.js";
@@ -15,7 +15,11 @@ export async function createClaithConfig(
     try {
       await writeFile(path, contents, { flag: "wx" });
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      if (
+        (error as NodeJS.ErrnoException).code !== "EEXIST" ||
+        !(await stat(path)).isFile()
+      )
+        throw error;
     }
   } catch (error) {
     throw new Error(`Cannot create ${path}: ${String(error)}`, {

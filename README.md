@@ -5,6 +5,30 @@ runs through fresh implementer/reviewer sessions, bounded repairs, verified
 integration into `dev`, push to `origin/dev`, and cleanup. Autonomous phase planning
 and final human phase acceptance remain future work.
 
+## Initialize local files
+
+With Node.js 24 and npm installed:
+
+```bash
+npm ci
+npm run dev -- init
+```
+
+`init` creates the directories under `~/.claith` first, then creates
+`config.toml` and the standard agent profiles in parallel. Each profile lives
+under `agents/<name>/` with `config.toml`, `prompt.md` and `skills/`; shared
+skills live under `agents/skills/`. Repeating `init` restores missing standard
+files and preserves existing content, including invalid configurations.
+
+Initialization only creates files. It does not load user settings, validate
+model credentials or connect to Temporal or Pi. Before later loading a profile,
+set `[model].provider` and `[model].name` in its `config.toml`, and edit
+`prompt.md` as needed.
+
+The current CLI exposes `init`; no command or `--help` prints usage without
+creating files. The runtime commands described below await reconnection after
+the repository layout refactor.
+
 ## Run locally
 
 Requires Node.js 24, npm, Git, Docker Compose, Linux `/proc`, an existing Pi login,
@@ -14,8 +38,8 @@ checked out), an accessible `origin/dev`, and matching local/remote base commits
 ```bash
 npm ci
 npm run dev -- init
-# Set provider/model and instructions in:
-# ~/.claith/agents/implementer.toml and ~/.claith/agents/reviewer.toml
+# Set model.provider/model.name in agents/<name>/config.toml
+# and instructions in agents/<name>/prompt.md under ~/.claith.
 docker compose up -d --wait
 npm run dev -- runtime
 ```

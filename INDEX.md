@@ -16,11 +16,11 @@
 | `src/domain/agents.ts`                            | SDK-independent Implementer, Reviewer and Planner definitions                                                     |
 | `src/application/agents/tools.ts`                 | Tool registry, role permissions and available tool selection                                                      |
 | `src/infrastructure/configuration/agentProfiles/` | Profile schemas, missing-template creation, TOML/prompt loading and bundled prompt templates                      |
-| `src/infrastructure/bootstrap/bootstrap.ts`       | Directory-only startup initialization                                                                             |
-| `src/infrastructure/configuration/directories/`   | Typed nested directory structure and recursive creation; startup integration is separate                          |
+| `src/infrastructure/bootstrap/bootstrap.ts`       | Explicit init: directories first, then Claith config and agent profiles in parallel                               |
+| `src/infrastructure/configuration/directories/`   | Typed nested directory structure and recursive creation; created by explicit init                                 |
 | `src/infrastructure/settings.ts`                  | Central ~/.claith location                                                                                        |
 | `src/infrastructure/configuration/`               | Runtime/profile schemas, resolved settings and config.toml/profile file loading and initialization                |
-| `src/infrastructure/configuration/claithConfig/`  | Sectioned Claith config schema, creation, TOML parsing and strict validation; startup integration is separate     |
+| `src/infrastructure/configuration/claithConfig/`  | Sectioned Claith config schema, creation, TOML parsing and strict validation; created by explicit init            |
 | `src/infrastructure/process.ts`                   | Logged and cancellable subprocess execution                                                                       |
 | `src/infrastructure/storage/files.ts`             | JSON persistence, artifact paths and JSONL event logging                                                          |
 | `src/infrastructure/workspace/`                   | Git/worktree operations, writer ownership, verification, delivery checkpoints, integration, push and cleanup      |
@@ -32,7 +32,7 @@
 | `src/infrastructure/temporal/activities/`         | Activity registration, heartbeats, managed repositories, task-run collection and evidence persistence             |
 | `src/infrastructure/temporal/workflows/`          | Temporal delivery/project workflows, signals, queries, configuration, runtime types and deterministic UUID helper |
 | `src/infrastructure/temporal/workflows/SPEC.md`   | Project admission, Taskflow workspace ownership, delivery evidence and replay contracts                           |
-| `src/interfaces/cli/`                             | Terminal entry adapter                                                                                            |
+| `src/interfaces/cli/`                             | Terminal init command and usage help                                                                              |
 | `tests/`                                          | Targeted configuration, workflow, workspace, Pi, terminal, and opt-in recovery checks                             |
 | `tests/fixtures/`                                 | Isolated Temporal, Git, Pi and interrupted-worker fixtures                                                        |
 | `docs/acceptance.md`                              | Real Pi acceptance procedure and recorded evidence                                                                |
