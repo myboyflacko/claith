@@ -201,10 +201,10 @@ authoritative for execution; the JSON record is its durable artifact projection.
 Run the smallest checks relevant to your change, for example:
 
 ```bash
-npm run test -- tests/contracts.test.ts tests/pi.test.ts
-npm run test -- tests/workspace.test.ts tests/workflows.test.ts
-npm run test -- tests/cli-process.test.ts
-CLAITH_RECOVERY_TESTS=1 npm run test -- tests/recovery.test.ts tests/task-recovery.test.ts
+npm run test -- tests/domain/contracts.test.ts tests/application/agents/roles.test.ts
+npm run test -- tests/infrastructure/workspace/git.test.ts tests/infrastructure/temporal/workflows/workflows.test.ts
+npm run test -- tests/interfaces/cli/process.test.ts
+CLAITH_RECOVERY_TESTS=1 npm run test -- tests/infrastructure/temporal/recovery.test.ts tests/infrastructure/temporal/task-recovery.test.ts
 npm run typecheck
 npm run lint:files -- src tests
 npm run format:check:files -- src tests README.md

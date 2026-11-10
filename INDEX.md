@@ -33,8 +33,8 @@
 | `src/infrastructure/temporal/workflows/`          | Temporal delivery/project workflows, signals, queries, configuration, runtime types and deterministic UUID helper |
 | `src/infrastructure/temporal/workflows/SPEC.md`   | Project admission, Taskflow workspace ownership, delivery evidence and replay contracts                           |
 | `src/interfaces/cli/`                             | Terminal init command and usage help                                                                              |
-| `tests/`                                          | Targeted configuration, workflow, workspace, Pi, terminal, and opt-in recovery checks                             |
-| `tests/fixtures/`                                 | Isolated Temporal, Git, Pi and interrupted-worker fixtures                                                        |
+| `tests/`                                          | Tests mirror src/ module paths; integration suites live under their owning module                                 |
+| `tests/fixtures/`                                 | Fixtures shared across test modules; module-specific fixtures live under tests/<module>/fixtures/                 |
 | `docs/acceptance.md`                              | Real Pi acceptance procedure and recorded evidence                                                                |
 | `docker-compose.yml`                              | Persistent local Temporal development API and Web UI                                                              |
 | `wiki/index.md`                                   | Durable project knowledge entrypoint                                                                              |

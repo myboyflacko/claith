@@ -26,6 +26,9 @@ Use GitHub Issues through GitHub CLI (gh).
 - Use TypeScript with Node.js 24 and manage the project and its dependencies with `npm`. Keep `package-lock.json` in sync with `package.json`; use `npm ci` for locked installs.
 - Run project tools through the npm scripts in `package.json`.
 - Use Vitest. Add relevant tests for behavior changes and bug fixes.
+- Mirror the source module hierarchy under `tests/`: tests for `src/infrastructure/configuration/agentProfiles/` belong in `tests/infrastructure/configuration/agentProfiles/`. Place integration suites under the module responsible for the behavior.
+- Keep module-specific fixtures in `tests/<module-path>/fixtures/`; reserve `tests/fixtures/` for fixtures shared across modules.
+- When moving a source module, move its tests and update imports, mocks, fixture/workflow paths, and documented test commands in the same change.
 - Automatically run the smallest relevant tests. Run the complete test suite only when explicitly requested.
 - Use ESLint for linting and Prettier for formatting. Lint and format changed TypeScript files, and type-check changes with `npm run typecheck`.
 - Run the smallest safe task-appropriate verification. Run `npm run build` only when explicitly requested or when the task changes packaging behavior.

@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { runtimeSchema } from "../../src/infrastructure/bootstrap/configuration.js";
+import { runtimeSchema } from "../../src/infrastructure/configuration/schema.js";
 import { contractSchema } from "../../src/domain/contracts.js";
 import type {
   RunInput,
@@ -9,7 +9,7 @@ import type {
   Review,
   RunRecord,
 } from "../../src/domain/contracts.js";
-import { git } from "../../src/workspace/git.js";
+import { git } from "../../src/infrastructure/workspace/git.js";
 import { agentProfiles } from "./profiles.js";
 export function taskInput(
   project = "/project",

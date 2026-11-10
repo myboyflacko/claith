@@ -1,6 +1,9 @@
-import { resolveProfile } from "../../src/infrastructure/bootstrap/configuration.js";
-import type { AgentProfile, Role } from "../../src/infrastructure/bootstrap/configuration.js";
-import { rolePolicy } from "../../src/domain/tools.js";
+import { resolveProfile } from "../../src/infrastructure/configuration/schema.js";
+import type {
+  AgentProfile,
+  Role,
+} from "../../src/infrastructure/configuration/schema.js";
+import { rolePolicy } from "../../src/application/agents/tools.js";
 
 export function agentProfile(
   role: Role,
