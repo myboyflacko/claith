@@ -26,8 +26,8 @@ The Planner owns reasoning and task preparation, not deterministic scheduling or
 
 Comprehensive project-management and monitoring features, deployment, and unattended continuous generation of new tasks are outside this specification's scope. Project identity, its Goal and Git delivery settings remain necessary execution context; this does not imply a project-management UI.
 
-## Relationship to the wiki and implementation
+## Specification authority and implementation
 
-The requester confirmed this task-centric direction during specification setup. It replaces the phase-first product requirements in `wiki/project/project_goal.md` and `wiki/architecture/architecture_delivery-runtime.md`: an approved phase Delivery Contract, rolling phase increments and mandatory human phase acceptance are not prerequisites of this model. Existing task-level `TaskContract` records remain implementation concepts, not phase approvals.
+This specification defines the task-centric product direction. An approved phase Delivery Contract, rolling phase increments and mandatory human phase acceptance are not prerequisites of this model. Existing task-level `TaskContract` records remain implementation concepts, not phase approvals.
 
-The wiki is retained unchanged as background evidence. `claith-architecture` distinguishes the confirmed product requirements from the current implementation and inferred design constraints. These specifications are drafts pending review; creating them does not implement the missing capabilities.
+`claith-architecture` distinguishes the confirmed product requirements from the current implementation and inferred design constraints. These specifications are drafts pending review; creating them does not implement the missing capabilities.
