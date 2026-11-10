@@ -4,8 +4,7 @@ export interface DirectoryStructure {
 }
 
 export const directoryStructure = {
-  agents: {},
-  skills: {},
+  agents: { skills: {} },
   sessions: {},
   worktrees: {},
   log: {},

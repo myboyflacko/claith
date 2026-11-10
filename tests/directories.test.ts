@@ -31,12 +31,13 @@ describe("directory structure", () => {
       "agents",
       "log",
       "sessions",
-      "skills",
       "worktrees",
     ]);
     for (const entry of entries) {
       expect(entry.isDirectory()).toBe(true);
-      expect(await readdir(join(configDir, entry.name))).toEqual([]);
+      expect(await readdir(join(configDir, entry.name))).toEqual(
+        entry.name === "agents" ? ["skills"] : [],
+      );
     }
   });
 
@@ -83,11 +84,12 @@ describe("directory structure", () => {
     expect(await readdir(join(temporaryDirectory, "sessions"))).toEqual([]);
   });
 
-  it.each([".", "agents", "skills", "sessions", "worktrees", "log"])(
+  it.each([".", "agents", "agents/skills", "sessions", "worktrees", "log"])(
     "reports and preserves a file blocking %s",
     async (directory) => {
       const configDir = join(temporaryDirectory, ".claith");
-      if (directory !== ".") await mkdir(configDir);
+      if (directory !== ".")
+        await mkdir(join(configDir, directory, ".."), { recursive: true });
       const path = join(configDir, directory);
       await writeFile(path, "preserve me");
       const result = createDirectories({ configDir });

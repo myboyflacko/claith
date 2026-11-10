@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { implementerSystemPrompt } from "../src/agents/prompts/system/implementer.js";
-import { reviewerSystemPrompt } from "../src/agents/prompts/system/reviewer.js";
+import { implementerSystemPrompt } from "../src/infrastructure/configuration/agentProfiles/templates/implementer.js";
+import { reviewerSystemPrompt } from "../src/infrastructure/configuration/agentProfiles/templates/reviewer.js";
 import { buildImplementerPrompt } from "../src/agents/prompts/user/implementer.js";
 import { buildReviewerPrompt } from "../src/agents/prompts/user/reviewer.js";
 import { buildCorrectionPrompt } from "../src/agents/prompts/user/correction.js";
