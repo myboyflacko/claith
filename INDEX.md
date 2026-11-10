@@ -1,50 +1,16 @@
-| path                                              | description                                                                                                       |
-| ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `README.md`                                       | Native runtime, terminal commands, configuration, recovery, and verification                                      |
-| `AGENTS.md`                                       | Repository instructions and working standards                                                                     |
-| `goal-and-requirements.md`                        | Draft product ground truth: collaborative Goal-based planning and autonomous task delivery                        |
-| `architecture.md`                                 | Draft spec graph root: SQLite task intent, Temporal execution, module boundaries and implementation gaps          |
-| `src/domain/SPEC.md`                              | Task identity, structured submissions and revision-bound evidence acceptance                                      |
-| `src/application/SPEC.md`                         | Planner task-management boundary, role/tool policy and disconnected agent composition                             |
-| `src/infrastructure/configuration/SPEC.md`        | Create-only initialization, strict profile/config loading and migration boundaries                                |
-| `src/infrastructure/temporal/SPEC.md`             | Workflow/Activity boundary, evidence persistence and current runtime wiring gaps                                  |
-| `src/infrastructure/workspace/SPEC.md`            | Git ownership, candidate/integration evidence, safe push/cleanup and configurable-target limitation               |
-| `package.json`                                    | npm entrypoints, checks, and pinned runtime dependencies                                                          |
-| `package-lock.json`                               | Locked dependency graph for npm ci                                                                                |
-| `.nvmrc`                                          | Node.js major version                                                                                             |
-| `tsconfig.json`                                   | Strict source and test type checking                                                                              |
-| `tsconfig.build.json`                             | ESM source compilation and declarations                                                                           |
-| `eslint.config.mjs`                               | ESLint configuration                                                                                              |
-| `.prettierrc.json`                                | Prettier formatting configuration                                                                                 |
-| `.prettierignore`                                 | Formatting exclusions                                                                                             |
-| `vitest.config.ts`                                | Vitest configuration                                                                                              |
-| `src/main.ts`                                     | Development and compiled CLI entrypoint                                                                           |
-| `src/domain/`                                     | Task contracts, verification plans, submission validation, delivery evidence and run models                       |
-| `src/domain/agents.ts`                            | SDK-independent Implementer, Reviewer and Planner definitions                                                     |
-| `src/application/agents/tools.ts`                 | Tool registry, role permissions and available tool selection                                                      |
-| `src/infrastructure/configuration/agentProfiles/` | Profile schemas, missing-template creation, TOML/prompt loading and bundled prompt templates                      |
-| `src/infrastructure/bootstrap/bootstrap.ts`       | Explicit init: directories first, then Claith config and agent profiles in parallel                               |
-| `src/infrastructure/configuration/directories/`   | Typed nested directory structure and recursive creation; created by explicit init                                 |
-| `src/infrastructure/settings.ts`                  | Central ~/.claith location                                                                                        |
-| `src/infrastructure/configuration/`               | Runtime/profile schemas, resolved settings and config.toml/profile file loading and initialization                |
-| `src/infrastructure/configuration/claithConfig/`  | Sectioned Claith config schema, creation, TOML parsing and strict validation; created by explicit init            |
-| `src/infrastructure/process.ts`                   | Logged and cancellable subprocess execution                                                                       |
-| `src/infrastructure/storage/files.ts`             | JSON persistence, artifact paths and JSONL event logging                                                          |
-| `src/infrastructure/workspace/`                   | Git/worktree operations, writer ownership, verification, delivery checkpoints, integration, push and cleanup      |
-| `src/infrastructure/pi/`                          | Pi SDK adapter                                                                                                    |
-| `src/infrastructure/pi/SPEC.md`                   | Prepared-session configuration isolation, role-neutral boundary and lifecycle contracts                           |
-| `src/infrastructure/pi/session.ts`                | Role-neutral Pi session factory accepting prepared agent configuration                                            |
-| `src/infrastructure/pi/tools/`                    | Pi tool definitions for process execution, diff reading and structured submissions                                |
-| `src/infrastructure/temporal/`                    | Temporal clients and worker setup                                                                                 |
-| `src/infrastructure/temporal/activities/`         | Activity registration, heartbeats, managed repositories, task-run collection and evidence persistence             |
-| `src/infrastructure/temporal/workflows/`          | Temporal delivery/project workflows, signals, queries, configuration, runtime types and deterministic UUID helper |
-| `src/infrastructure/temporal/workflows/SPEC.md`   | Project admission, Taskflow workspace ownership, delivery evidence and replay contracts                           |
-| `src/interfaces/cli/`                             | Connected terminal interface: init and usage help only; delivery commands are not wired                           |
-| `tests/`                                          | Tests mirror src/ module paths; integration suites live under their owning module                                 |
-| `tests/fixtures/`                                 | Fixtures shared across test modules; module-specific fixtures live under tests/<module>/fixtures/                 |
-| `docs/acceptance.md`                              | Real Pi acceptance procedure and recorded evidence                                                                |
-| `docker-compose.yml`                              | Persistent local Temporal development API and Web UI                                                              |
-| `wiki/index.md`                                   | Durable project knowledge entrypoint                                                                              |
-| `wiki/architecture/ARCHITECTURE_INDEX.md`         | Accepted runtime direction and selected tools                                                                     |
-| `wiki/project/project_phase-one.md`               | Phase-delivery target and baseline evidence                                                                       |
-| `wiki/research/RESEARCH_INDEX.md`                 | Historical research and source references                                                                         |
+# Specification Index
+
+## Product and architecture
+
+- [Product goal and requirements](goal-and-requirements.md) — Goal-driven collaborative planning and autonomous task delivery.
+- [System architecture](architecture.md) — Planning, SQLite task intent, deterministic execution and module boundaries.
+
+## Modules
+
+- [Delivery domain](src/domain/SPEC.md) — Task identity, structured submissions and revision-bound evidence acceptance.
+- [Planning application](src/application/SPEC.md) — Planner task management, role/tool policy and agent composition.
+- [Runtime configuration](src/infrastructure/configuration/SPEC.md) — Explicit initialization and strict configuration/profile loading.
+- [Pi session adapter](src/infrastructure/pi/SPEC.md) — Prepared-session isolation and role-neutral lifecycle.
+- [Temporal runtime](src/infrastructure/temporal/SPEC.md) — Durable execution, Activity effects and evidence persistence.
+  - [Project workflows](src/infrastructure/temporal/workflows/SPEC.md) — Admission, task delivery, replay and recovery contracts.
+- [Git workspace](src/infrastructure/workspace/SPEC.md) — Writer ownership, verification, integration, push and cleanup safety.

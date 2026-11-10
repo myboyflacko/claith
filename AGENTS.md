@@ -2,18 +2,18 @@
 
 **Name:** claith
 
-**Purpose:** Self-hosted agentic development environment that turns approved Delivery Contracts into evidence-backed software outcomes with minimal developer attention
+**Purpose:** Self-hosted agentic development environment that turns collaboratively planned, Goal-driven tasks into verified software delivery through deterministic execution with minimal developer attention
 
 ## Project Index
 
-Use `INDEX.md` in the repository root for initial orientation.
-When an entry point, top-level domain, or its responsibility changes, update `INDEX.md` in the same change.
+Use `INDEX.md` in the repository root for initial orientation. It references only product, architecture and module specifications, not individual source files or other documentation.
+Update the index in the same change whenever a spec is added, moved or removed, or an indexed module's responsibility changes.
 
-## Additional Project Context
+## Specifications
 
-Code and configuration are authoritative for current behavior. When non-standard project knowledge or prior project-specific decisions, systems, or procedures could affect the task, start at `wiki/index.md` and read only relevant active pages. Treat `wiki/raw/` as evidence. Modify the wiki only when explicitly requested, and read `wiki/SCHEMA.md` first.
+When planning or implementing, read `goal-and-requirements.md`, then consult `architecture.md` and the owning module's `SPEC.md` as relevant. Specs define the product direction, decisions, contracts and module boundaries; code and configuration establish current implemented behavior. Surface and reconcile contradictions rather than silently diverging. Make material deviations explicit. Current requester instructions remain authoritative.
 
-When planning or implementing, read `wiki/project/project_goal.md` and follow the project goal. Make material deviations explicit. Current requester instructions remain authoritative when they conflict with that direction.
+After every module change, update its owning `SPEC.md` in the same change so it accurately reflects the module's behavior, responsibilities, interfaces, dependencies and invariants. If the module has no owning spec, create one at the appropriate module boundary and add it to `INDEX.md`. Update parent or related specs when cross-module contracts or architecture change. Keep specs concise and distinguish implemented behavior from target requirements and unconfirmed design.
 
 ## Issue Tracker
 
@@ -37,7 +37,7 @@ Use GitHub Issues through GitHub CLI (gh).
 
 ## Workflow
 
-Implement → verify → lint → inspect the diff → commit. Fix failures and repeat from the affected check.
+Implement → update affected specs → verify → lint → inspect the diff → commit. Fix failures and repeat from the affected check.
 
 ## Final Response
 
